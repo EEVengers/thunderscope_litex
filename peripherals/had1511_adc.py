@@ -3,8 +3,6 @@
 #
 # Copyright (c) 2020-2021 Felix Domke <tmbinc@elitedvb.net>
 # Copyright (c) 2021 Florent Kermarrec <florent@enjoy-digital.fr>
-# Copyright (c) 2023 John Simons <john@totalitee.nl>
-
 # SPDX-License-Identifier: BSD-2-Clause
 
 import time
@@ -239,15 +237,15 @@ class HAD1511ADC(Module, AutoCSR):
             # Generate a Ramp Pattern when no pads are provided.
             for i in range(nchannels):
                 adc_data = Signal(8)
-                self.sync.adc_frame += adc_data.eq(adc_data + nchannels)
-                self.sync.adc_frame += adc_source.data[8*i:8*(i+1)].eq(adc_data + i)
+                self.sync += adc_data.eq(adc_data + nchannels)
+                self.sync += adc_source.data[8*i:8*(i+1)].eq(adc_data + i)
 
         # Clock Domain Crossing.
         # ----------------------
 
         self.submodules.cdc = stream.ClockDomainCrossing(
             layout  = [("data", nchannels*8)],
-            cd_from = "adc_frame",
+            cd_from = "adc_frame" if pads is not None else clock_domain,
             cd_to   = clock_domain
         )
         self.comb += self.adc_source.connect(self.cdc.sink)
@@ -287,9 +285,10 @@ class HAD1511ADC(Module, AutoCSR):
                 ),
             ]
 
-        # BitSlips Count.
-        bitslip_count = self._bitslip_count.status
-        self.sync.adc_frame += bitslip_count.eq(bitslip_count + self.bitslip)
+        if pads is not None:
+            # BitSlips Count.
+            bitslip_count = self._bitslip_count.status
+            self.sync.adc_frame += bitslip_count.eq(bitslip_count + self.bitslip)
 
         # Samples Count.
         sample_count = self._sample_count.status
@@ -336,7 +335,7 @@ class HAD1511ADCDriver:
         self.control.write(HAD1511_CORE_CONTROL_FRAME_RST)
 
     def set_reg(self, reg, value):
-        self.spi.write(5, [reg, (value >> 8) & 0xff, value & 0xff])
+        self.spi.write(0, [reg, (value >> 8) & 0xff, value & 0xff])
 
     def set_gain(self, gain):
         if self.mode == "single":

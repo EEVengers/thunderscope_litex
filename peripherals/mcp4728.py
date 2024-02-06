@@ -18,7 +18,7 @@ from .i2c import *
 #                               D E F I N I T I O N S                                              #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-MCP4728_I2C_ADDR = 0xC0
+MCP4728_I2C_ADDR = 0x60
 
 MCP4728_GENERAL_CALL_COMMAND = 0x00
 MCP4728_GENERAL_CALL_RESET   = 0x06
@@ -42,7 +42,7 @@ class MCP4728Driver:
 
     def rst(self):
         self.i2c.start_cond()
-        self.i2c.write(self.addr)
+        self.i2c.write(I2C_W_ADDR(self.addr))
         self.i2c.write(MCP4728_GENERAL_CALL_COMMAND)
         self.i2c.write(MCP4728_GENERAL_CALL_RESET)
         self.i2c.stop_cond()
@@ -50,7 +50,7 @@ class MCP4728Driver:
     def set_ch(self, n, value):
         assert n < 4
         self.i2c.start_cond()
-        self.i2c.write(MCP4728_I2C_ADDR);
+        self.i2c.write(I2C_W_ADDR(self.addr))
         self.i2c.write(MCP4728_WRITE_DAC_REGISTER + (n << 1))
         self.i2c.write((value >> 8) & 0x0f)
         self.i2c.write((value >> 0) & 0xff)

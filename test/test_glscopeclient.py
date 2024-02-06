@@ -19,7 +19,7 @@ import threading
 # SCPI Server --------------------------------------------------------------------------------------
 
 class SCPIServer:
-    def __init__(self, bind_ip="localhost", channels=2, sample_rate=1e9, sample_depth=16384,
+    def __init__(self, bind_ip="localhost", channels=1, sample_rate=1e9, sample_depth=16384,
         control_port  = 5025,
         control_only  = False,
         waveform_port = 50101):
@@ -73,7 +73,7 @@ class SCPIServer:
                 print("Control: Disconnect")
                 client.close()
 
-    def _waveform_thread(self, pattern=False):
+    def _waveform_thread(self, pattern=True):
         while True:
             client, addr = self.waveform_sock.accept()
             print(f"Waveform: Connected with {addr[0]}:{str(addr[1])}")

@@ -81,4 +81,4 @@ class LMH6518Driver:
         spi_data.append(cmd_field)
         spi_data.append((dat_field >> 8) & 0xff)
         spi_data.append((dat_field >> 0) & 0xff)
-        self.spi.write(cs=channel, data=spi_data)
+        self.spi.write(cs=channel+1, data=spi_data)

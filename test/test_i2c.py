@@ -15,11 +15,74 @@ from litex import RemoteClient
 sys.path.append("..")
 from peripherals.i2c import *
 
+from peripherals.zl30250 import *
+
+# AFE Frontend Constants ---------------------------------------------------------------------------
+
+AFE_CONTROL_LDO_EN      = (1 <<  0)
+AFE_CONTROL_COUPLING    = (1 <<  8)
+AFE_CONTROL_ATTENUATION = (1 << 16)
+
+AFE_STATUS_LDO_PWR_GOOD = (1 <<  0)
+
+AFE_AC_COUPLING = 0
+AFE_DC_COUPLING = 1
+
+AFE_1X_ATTENUATION  = 0
+AFE_10X_ATTENUATION = 1
+
+# ADC Constants ------------------------------------------------------------------------------------
+
+ADC_CONTROL_LDO_EN   = (1 <<  0)
+ADC_CONTROL_PLL_EN   = (1 <<  1)
+ADC_CONTROL_RST      = (1 <<  2)
+ADC_CONTROL_PWR_DOWN = (1 <<  3)
+
+ADC_STATUS_LDO_PWR_GOOD = (1 <<  0)
+
 # I2C Scan -----------------------------------------------------------------------------------------
 
 def i2c_scan(host, port):
     bus = RemoteClient(host=host, port=port)
     bus.open()
+
+    # LDO.
+    def configure_frontend_ldo(enable):
+        control_value  = bus.regs.frontend_control.read()
+        control_value &= ~(     1 * AFE_CONTROL_LDO_EN)
+        control_value |=  (enable * AFE_CONTROL_LDO_EN)
+        bus.regs.frontend_control.write(control_value)
+
+    print("- Enabling frontend LDO.")
+    configure_frontend_ldo(1)
+
+    # LDO.
+    def configure_ldo(enable):
+        control_value  = bus.regs.adc_control.read()
+        control_value &= ~(     1 * ADC_CONTROL_LDO_EN)
+        control_value |=  (enable * ADC_CONTROL_LDO_EN)
+        bus.regs.adc_control.write(control_value)
+
+    print("- Enabling ADC LDO.")
+    configure_ldo(1)
+
+    # PLL.
+    def configure_pll(enable):
+        control_value  = bus.regs.adc_control.read()
+        control_value &= ~(     1 * ADC_CONTROL_PLL_EN)
+        control_value |=  (enable * ADC_CONTROL_PLL_EN)
+        bus.regs.adc_control.write(control_value)
+
+    print("- Disabling ZL30250 LDO.")
+    configure_pll(0)
+    time.sleep(1)
+
+    print("- Enabling ZL30250 PLL.")
+    configure_pll(1)
+    
+    #print("- Configuring ZL30250 PLL (I2C)...")
+    #zl30250 = ZL30250Driver(bus=bus, name="i2c", addr=ZL30250_I2C_ADDR)
+    #zl30250.read(0x0001)
 
     i2c = I2CDriver(bus=bus, name="i2c")
 

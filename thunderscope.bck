@@ -4,8 +4,6 @@
 # This file is part of Thunderscope-LiteX project.
 #
 # Copyright (c) 2022 Florent Kermarrec <florent@enjoy-digital.fr>
-# Copyright (c) 2023 John Simons <john@totalitee.nl>
-
 # SPDX-License-Identifier: BSD-2-Clause
 
 import os
@@ -41,11 +39,14 @@ from peripherals.trigger import Trigger
 # IOs ----------------------------------------------------------------------------------------------
 
 _io = [
+     # Main system clock. 
+    ("clk50", 0,
+        Subsignal("p", Pins("H4"), IOStandard("DIFF_SSTL15")),
+        Subsignal("n", Pins("G4"), IOStandard("DIFF_SSTL15")),
+    ),
+
     # Leds.
     # -----
-    #("user_led_n", 0, Pins("U21"), IOStandard("LVCMOS33")), # Green.
-    #("user_led_n", 1, Pins("R17"), IOStandard("LVCMOS33")), # Red.
-    #("user_led_n", 2, Pins("Y22"), IOStandard("LVCMOS33")), # Green.
     ("user_led_n", 0, Pins("T21"), IOStandard("LVCMOS33")), # Red.
 
     # PCIe / Gen2 X4.
@@ -64,31 +65,27 @@ _io = [
     # ---------
 
     # Probe Compensation.
-    ("fe_probe_compensation", 0, Pins("N20"), IOStandard("LVCMOS33")),
+    ("fe_probe_compensation", 0, Pins("J22"), IOStandard("LVCMOS33")),
 
     # Control / Status.
     ("fe_control", 0,
-        Subsignal("ldo_en",      Pins("J21"), IOStandard("LVCMOS33")), # TPS7A9101/LDO & LM27761 Enable.
+        Subsignal("fe_en",      Pins("J21"), IOStandard("LVCMOS33")), # TPS7A9101/LDO & LM27761 Enable.
         Subsignal("coupling",    Pins("H20 K19 H19 N18"), IOStandard("LVCMOS33")),
         Subsignal("attenuation", Pins("G20 K18 J19 N19"), IOStandard("LVCMOS33")),
-        # TODO: termination N18 L19 L21 M18
         IOStandard("LVCMOS33"),
     ),
-    # Programmable Gain Amplifier SPI.
-    ("main_spi", 0,
+    # SPI
+    ("spi", 0,
         Subsignal("clk",  Pins("K21")),
-        Subsignal("cs_n", Pins("J22 L20 M21 L18 K13")),
+        Subsignal("cs_n", Pins("J20 L20 M21 L18 K13")),
         Subsignal("mosi", Pins("K22")),
         IOStandard("LVCMOS33"),
     ),
 
     # I2C bus.
     # --------
-    # - Trim DAC (MCP4728 @ 0xC0).
+    # - Trim DAC (MCP4728 @ 0x61).
     # - PLL      (LMK61E2 @ 0x58).
-    # - ClockGen (ZL30250 @ 0xD8).
-    # - TODO: Digi-pot @ 0x58.
-    
     ("i2c", 0,
         Subsignal("sda", Pins("J14")),
         Subsignal("scl", Pins("H14")),
@@ -100,16 +97,16 @@ _io = [
 
     # Control / Status / SPI.
     ("adc_control", 0,
-        Subsignal("ldo_en", Pins("J20")), # TPS7A9101/LDO Enable.
-        Subsignal("pll_en", Pins("K14")), # LMK61E2/PLL Output Enable.
+        Subsignal("acq_en", Pins("J20")), # TPS7A9101/LDO Enable.
+        Subsignal("osc_oe", Pins("K14")), # LMK61E2/PLL Output Enable.
         IOStandard("LVCMOS33"),
     ),
-    # ("adc_spi", 0,
-    #     Subsignal("cs_n", Pins("M18")),
-    #     Subsignal("clk",  Pins("L16")),
-    #     Subsignal("mosi", Pins("K16")),
-    #     IOStandard("LVCMOS33"),
-    # ),
+    ("adc_spi", 0,
+        Subsignal("cs_n", Pins("M18")),
+        Subsignal("clk",  Pins("L16")),
+        Subsignal("mosi", Pins("K16")),
+        IOStandard("LVCMOS33"),
+    ),
     # Datapath.
     ("adc_data", 0,
         Subsignal("lclk_p", Pins("C18")), # Bitclock.
@@ -136,6 +133,7 @@ class Platform(XilinxPlatform):
             "set_property BITSTREAM.GENERAL.COMPRESS TRUE [current_design]",
             "set_property CFGBVS VCCO [current_design]",
             "set_property CONFIG_VOLTAGE 3.3 [current_design]",
+            "set_property BITSTREAM.CONFIG.UNUSEDPIN PULLDOWN [current_design]"
         ]
 
         self.toolchain.additional_commands = [
@@ -145,7 +143,7 @@ class Platform(XilinxPlatform):
 
     def create_programmer(self, name='openocd'):
         if name == 'openocd':
-            return OpenOCD("openocd_xc7_ft232.cfg", "bscan_spi_xc7a100t.bit")
+            return OpenOCD("openocd_xc7_ft232.cfg", "bscan_spi_xc7a35t.bit")
         elif name == 'vivado':
             # TODO: some board versions may have s25fl128s
             return VivadoProgrammer(flash_part='s25fl256sxxxxxx0-spi-x1_x2_x4')
@@ -158,49 +156,34 @@ class Platform(XilinxPlatform):
 
 class CRG(Module):
     def __init__(self, platform, sys_clk_freq):
-        self.rst = Signal()
-        self.clock_domains.cd_sys    = ClockDomain()
-        self.clock_domains.cd_idelay = ClockDomain()
+        self.rst          = Signal()
+        self.cd_sys       = ClockDomain()
+        self.cd_sys4x     = ClockDomain()
+        self.cd_sys4x_dqs = ClockDomain()
+        self.cd_idelay    = ClockDomain()
 
-        # CFGM Clk ~65MHz.
-        cfgm_clk      = Signal()
-        cfgm_clk_freq = int(65e6)
-        self.specials += Instance("STARTUPE2",
-            i_CLK       = 0,
-            i_GSR       = 0,
-            i_GTS       = 0,
-            i_KEYCLEARB = 1,
-            i_PACK      = 0,
-            i_USRCCLKO  = cfgm_clk,
-            i_USRCCLKTS = 0,
-            i_USRDONEO  = 1,
-            i_USRDONETS = 1,
-            o_CFGMCLK   = cfgm_clk
-        )
-        platform.add_period_constraint(cfgm_clk, 1e9/65e6)
+        # # #
 
-        # PLL.
-        self.submodules.pll = pll = S7PLL(speedgrade=-1)
+        self.pll = pll = S7PLL(speedgrade=-2)
         self.comb += pll.reset.eq(self.rst)
-        pll.register_clkin(cfgm_clk, cfgm_clk_freq)
-        pll.create_clkout(self.cd_sys, sys_clk_freq)
-        pll.create_clkout(self.cd_idelay, 200e6)
+        pll.register_clkin(platform.request("clk50"), 50e6)
+        pll.create_clkout(self.cd_sys,       sys_clk_freq)
+        pll.create_clkout(self.cd_sys4x,     4*sys_clk_freq)
+        pll.create_clkout(self.cd_sys4x_dqs, 4*sys_clk_freq, phase=90)
+        pll.create_clkout(self.cd_idelay,    200e6)
         platform.add_false_path_constraints(self.cd_sys.clk, pll.clkin) # Ignore sys_clk to pll.clkin path created by SoC's rst.
-        platform.add_period_constraint(self.cd_sys.clk, 1e9/sys_clk_freq)
-        platform.add_period_constraint(self.cd_idelay.clk, 1e9/200e6)
 
-        # IDELAYCTRL.
-        self.submodules.idelayctrl = S7IDELAYCTRL(self.cd_idelay)
+        self.idelayctrl = S7IDELAYCTRL(self.cd_idelay)
 
 # BaseSoC -----------------------------------------------------------------------------------------
 
 class BaseSoC(SoCMini):
     def __init__(self, sys_clk_freq=int(125e6),
-        with_pcie     = True,
-        with_frontend = True,
-        with_adc      = True,
-        with_jtagbone = True,
-        with_analyzer = True,
+        with_pcie     = False,
+        with_frontend = False,
+        with_adc      = False,
+        with_jtagbone = False,
+        with_analyzer = False,
     ):
         platform = Platform()
 
@@ -230,7 +213,7 @@ class BaseSoC(SoCMini):
             sys_clk_freq = sys_clk_freq,
             polarity     = 1,
         )
-        self.leds.add_pwm(default_width=1023, default_period=1024) # Default to 1/8 to reduce brightness.
+        self.leds.add_pwm(default_width=128, default_period=1024) # Default to 1/8 to reduce brightness.
 
         # PCIe -------------------------------------------------------------------------------------
         if with_pcie:
@@ -253,12 +236,9 @@ class BaseSoC(SoCMini):
 
         # Frontend / ADC ---------------------------------------------------------------------------
 
-        # I2C bus.
-        # --------
-        # - Trim DAC (MCP4728 @ 0xC0).
-        # - OLD: PLL      (LMK61E2 @ 0x58).
-        # - ClockGen (ZL30250 @ 0xD8).
-        # - TODO: Digi-pot @ 0x58.
+        # I2C Bus:
+        # - Trim DAC (MCP4728 @ 0x61).
+        # - PLL      (LMK61E2 @ 0x58).
         self.submodules.i2c = I2CMaster(platform.request("i2c"))
 
         # Probe Compensation.
@@ -269,24 +249,14 @@ class BaseSoC(SoCMini):
             default_period = int(1e-3*sys_clk_freq)
         )
 
-        pga_spi_pads = platform.request("main_spi")
-        pga_spi_clk_freq = 1e6
-        pga_spi_pads.miso = Signal()
-        self.submodules.spi_bus = spi_bus = SPIMaster(
-            pads         = pga_spi_pads,
-            data_width   = 24,
-            sys_clk_freq = sys_clk_freq,
-            spi_clk_freq = pga_spi_clk_freq
-        )
-
         # Frontend.
         if with_frontend:
 
             class Frontend(Module, AutoCSR):
-                def __init__(self, control_pads, spi_bus, sys_clk_freq):
+                def __init__(self, control_pads, pga_spi_pads, sys_clk_freq, pga_spi_clk_freq=1e6):
                     # Control/Status.
                     self._control = CSRStorage(fields=[
-                        CSRField("ldo_en", offset=0, size=1, description="Frontend LDO-Enable.", values=[
+                        CSRField("fe_en", offset=0, size=1, description="Frontend LDO-Enable.", values=[
                             ("``0b0``", "LDO disabled."),
                             ("``0b1``", "LDO enabled."),
                         ]),
@@ -302,8 +272,7 @@ class BaseSoC(SoCMini):
                     # # #
 
                     # Power.
-                    self.comb += control_pads.ldo_en.eq(self._control.fields.ldo_en)
-                    #self.comb += self._status.fields.ldo_pwr_good.eq(status_pads.ldo_pg)
+                    self.comb += control_pads.fe_en.eq(self._control.fields.fe_en)
 
                     # Coupling.
                     self.comb += control_pads.coupling.eq(self._control.fields.coupling)
@@ -312,30 +281,37 @@ class BaseSoC(SoCMini):
                     self.comb += control_pads.attenuation.eq(self._control.fields.attenuation)
 
                     # Programmable Gain Amplifier (LMH6518/SPI).
-                    self.submodules.spi = spi_bus
-                    
+                    pga_spi_pads.miso = Signal()
+                    self.submodules.spi = SPIMaster(
+                        pads         = pga_spi_pads,
+                        data_width   = 24,
+                        sys_clk_freq = sys_clk_freq,
+                        spi_clk_freq = pga_spi_clk_freq
+                    )
 
             self.submodules.frontend = Frontend(
                 control_pads     = platform.request("fe_control"),
-                spi_bus          = spi_bus,
+                pga_spi_pads     = platform.request("spi"),
                 sys_clk_freq     = sys_clk_freq,
+                pga_spi_clk_freq = 1e6,
             )
 
         # ADC.
         if with_adc:
 
             class ADC(Module, AutoCSR):
-                def __init__(self, control_pads, spi_bus, data_pads, sys_clk_freq,
+                def __init__(self, control_pads, status_pads, spi_pads, data_pads, sys_clk_freq,
                     data_width   = 128,
+                    spi_clk_freq = 1e6
                 ):
 
                     # Control/Status.
                     self._control = CSRStorage(fields=[
-                        CSRField("ldo_en", offset=0, size=1, description="ADC LDO-Enable.", values=[
+                        CSRField("acq_en", offset=0, size=1, description="ADC LDO-Enable.", values=[
                             ("``0b0``", "LDO disabled."),
                             ("``0b1``", "LDO enabled."),
                         ]),
-                        CSRField("pll_en", offset=1, size=1, description="ADC-PLL Output-Enable.", values=[
+                        CSRField("osc_en", offset=1, size=1, description="ADC-PLL Output-Enable.", values=[
                             ("``0b0``", "PLL output disabled."),
                             ("``0b1``", "PLL output enabled."),
                         ]),
@@ -348,6 +324,8 @@ class BaseSoC(SoCMini):
                             ("``0b1``", "ADC in power-down mode."),
                         ]),
                     ])
+                   
+
                     # Data Source.
                     self.source = stream.Endpoint([("data", data_width)])
 
@@ -357,17 +335,18 @@ class BaseSoC(SoCMini):
 
                     # Control.
                     self.comb += [
-                        control_pads.ldo_en.eq(self._control.fields.ldo_en),
-                        control_pads.pll_en.eq(self._control.fields.pll_en),
+                        control_pads.acq_en.eq(self._control.fields.acq_en),
+                        control_pads.osc_oe.eq(self._control.fields.osc_en),
                     ]
 
-                    # Status.
-                    #self.comb += [
-                    #    self._status.fields.ldo_pwr_good.eq(status_pads.ldo_pg)
-                    #]
-
-                    # SPI.
-                    self.submodules.spi = spi_bus
+                    # # SPI.
+                    # spi_pads.miso = Signal()
+                    # self.submodules.spi = SPIMaster(
+                    #     pads         = spi_pads,
+                    #     data_width   = 24,
+                    #     sys_clk_freq = sys_clk_freq,
+                    #     spi_clk_freq = spi_clk_freq
+                    # )
 
                     # Data-Path --------------------------------------------------------------------
 
@@ -392,9 +371,11 @@ class BaseSoC(SoCMini):
 
             self.submodules.adc = ADC(
                 control_pads = platform.request("adc_control"),
-                spi_bus      = spi_bus,
+                status_pads  = None, #platform.request("adc_status"),
+                spi_pads     = platform.request("adc_spi"),
                 data_pads    = platform.request("adc_data"),
                 sys_clk_freq = sys_clk_freq,
+                spi_clk_freq = 1e6,
             )
 
             # ADC -> PCIe.

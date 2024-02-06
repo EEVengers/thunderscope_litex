@@ -18,9 +18,10 @@ from peripherals.spi import *
 from peripherals.i2c import *
 from peripherals.lmh6518 import *
 from peripherals.mcp4728 import *
-from peripherals.zl30250 import *
+from peripherals.lmk61e2 import *
 from peripherals.trigger import *
 from peripherals.had1511_adc import *
+from peripherals.zl30250 import *
 
 from test_i2c import *
 
@@ -120,7 +121,7 @@ def pga_configure(host, port, channel, preamp_db, atten_db, bw_mhz, offset):
 
     # LMH6518.
     print("- Configuring LMH6518 (SPI)...")
-    pga = LMH6518Driver(bus=bus, name="spi_bus_spi_spi")
+    pga = LMH6518Driver(bus=bus, name="frontend_spi")
     pga.set(channel, preamp_db, atten_db, bw_mhz)
 
     # MCP4728.
@@ -164,7 +165,7 @@ def adc_configure(host, port, channel, mode, downsampling):
 
     print("- Configuring ZL30250 PLL (I2C)...")
     zl30250 = ZL30250Driver(bus=bus, name="i2c", addr=ZL30250_I2C_ADDR)
-    zl30250.init(config=ZL30250_I2C_CONF)
+    zl30250.init(config=ZL30250_I2C_CONF, debug=True)
 
     # PWR_DOWN.
     def configure_pwr_down(enable):
@@ -189,7 +190,7 @@ def adc_configure(host, port, channel, mode, downsampling):
 
     # HAD1511.
     print("- Configuring HAD1511 (SPI)...")
-    spi = SPIDriver(bus=bus, name="adc_spi")
+    spi = SPIDriver(bus=bus, name="frontend_spi")
     adc = HAD1511ADCDriver(bus, spi, n=0)
     adc.reset()
     adc.downsampling.write(downsampling)
