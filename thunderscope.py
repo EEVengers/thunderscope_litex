@@ -69,7 +69,7 @@ _io = [
 
     # Control / Status.
     ("fe_control", 0,
-        Subsignal("ldo_en",      Pins("J21"), IOStandard("LVCMOS33")), # TPS7A9101/LDO & LM27761 Enable.
+        Subsignal("fe_en",      Pins("J21"), IOStandard("LVCMOS33")), # TPS7A9101/LDO & LM27761 Enable.
         Subsignal("coupling",    Pins("H20 K19 H19 N18"), IOStandard("LVCMOS33")),
         Subsignal("attenuation", Pins("G20 K18 J19 N19"), IOStandard("LVCMOS33")),
         # TODO: termination N18 L19 L21 M18
@@ -136,13 +136,13 @@ class Platform(XilinxPlatform):
 
         self.toolchain.additional_commands = [
             # Non-Multiboot SPI-Flash bitstream generation.
-            "write_bitstream -force -bin_file ${build_name}.bit"
-            "set_property BITSTREAM.CONFIG.NEXT_CONFIG_ADDR 0x0097FC00 [current_design]"
-            "write_bitstream -force -bin_file ${build_name}_gold.bit"
-            "write_cfgmem -force -format mcs -size 32 -interface SPIx4 -loadbit \"up 0x00000000 ${build_name}_gold.bit up 0x00980000 ${build_name}.bit\" -loaddata \"up 0x0097FC00 ../../cfg/timer1.bin up 0x01300000 ../../cfg/timer2.bin\" ${_xil_proj_name_}_full.mcs"
-            "write_cfgmem -force -format mcs -size 32 -interface SPIx4 -loadbit \"up 0x00980000 ${build_name}.bit\" ${build_name}_update.mcs"
-
-            "write_cfgmem -force -format bin -interface spix4 -size 16 -loadbit \"up 0x0 {build_name}.bit\" -file {build_name}.bin",
+            "write_cfgmem -force -format bin -interface spix4 -size 16 -loadbit \"up 0x0 {build_name}_full.bit\" -file {build_name}.bin",
+            # Multiboot bitstreams
+            "write_bitstream -force -bin_file {build_name}.bit",
+            "set_property BITSTREAM.CONFIG.NEXT_CONFIG_ADDR 0x0097FC00 [current_design]",
+            "write_bitstream -force -bin_file {build_name}_gold.bit",
+            "write_cfgmem -force -format mcs -size 32 -interface SPIx4 -loadbit \"up 0x00000000 {build_name}_gold.bit up 0x00980000 {build_name}.bit\" -loaddata \"up 0x0097FC00 ../../../cfg/timer1.bin up 0x01300000 ../../../cfg/timer2.bin\" {build_name}_full.mcs",
+            "write_cfgmem -force -format mcs -size 32 -interface SPIx4 -loadbit \"up 0x00980000 {build_name}.bit\" {build_name}_update.mcs"
         ]
 
     def create_programmer(self, name='openocd'):
