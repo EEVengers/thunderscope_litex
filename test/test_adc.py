@@ -22,6 +22,7 @@ from peripherals.lmk61e2 import *
 from peripherals.trigger import *
 from peripherals.had1511_adc import *
 from peripherals.zl30250 import *
+from peripherals.zl30260 import *
 
 from test_i2c import *
 
@@ -160,12 +161,12 @@ def adc_configure(host, port, channel, mode, downsampling):
         control_value |=  (enable * ADC_CONTROL_PLL_EN)
         bus.regs.adc_control.write(control_value)
 
-    print("- Enabling ZL30250 PLL.")
+    print("- Enabling ZL30260 PLL.")
     configure_pll(1)
 
-    print("- Configuring ZL30250 PLL (I2C)...")
-    zl30250 = ZL30250Driver(bus=bus, name="i2c", addr=ZL30250_I2C_ADDR)
-    zl30250.init(config=ZL30250_I2C_CONF, debug=True)
+    print("- Configuring ZL30260 PLL (I2C)...")
+    zl30250 = ZL30260Driver(bus=bus, name="i2c", addr=ZL30260_I2C_ADDR)
+    zl30250.init(config=ZL30260_I2C_CONF, debug=True)
 
     # PWR_DOWN.
     def configure_pwr_down(enable):
@@ -190,7 +191,7 @@ def adc_configure(host, port, channel, mode, downsampling):
 
     # HAD1511.
     print("- Configuring HAD1511 (SPI)...")
-    spi = SPIDriver(bus=bus, name="frontend_spi")
+    spi = SPIDriver(bus=bus, name="main_spi")
     adc = HAD1511ADCDriver(bus, spi, n=0)
     adc.reset()
     adc.downsampling.write(downsampling)
