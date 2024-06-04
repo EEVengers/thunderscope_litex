@@ -66,7 +66,7 @@ zl30260_I2C_CONF = {
 #                                  S O F T W A R E                                                 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-class zl30260Driver:
+class ZL30260Driver:
     def __init__(self, bus, name, addr):
         self.i2c  = I2CDriver(bus=bus, name=name)
         self.addr = addr

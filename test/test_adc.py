@@ -122,7 +122,7 @@ def pga_configure(host, port, channel, preamp_db, atten_db, bw_mhz, offset):
 
     # LMH6518.
     print("- Configuring LMH6518 (SPI)...")
-    pga = LMH6518Driver(bus=bus, name="frontend_spi")
+    pga = LMH6518Driver(bus=bus, name="main_spi")
     pga.set(channel, preamp_db, atten_db, bw_mhz)
 
     # MCP4728.
