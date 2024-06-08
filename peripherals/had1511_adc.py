@@ -335,6 +335,7 @@ class HAD1511ADCDriver:
         self.control.write(HAD1511_CORE_CONTROL_FRAME_RST)
 
     def set_reg(self, reg, value):
+        print(f"hmcad 0x{reg:02X} 0x{value:04X}")
         self.spi.write(0, [reg, (value >> 8) & 0xff, value & 0xff])
 
     def set_gain(self, gain):

@@ -64,14 +64,24 @@ def afe_configure(host, port, channel, coupling, attenuation):
     print("---------------------------------------")
 
     # LDO.
-    def configure_ldo(enable):
+    def configure_fe_ldo(enable):
         control_value  = bus.regs.frontend_control.read()
         control_value &= ~(     1 * AFE_CONTROL_LDO_EN)
         control_value |=  (enable * AFE_CONTROL_LDO_EN)
         bus.regs.frontend_control.write(control_value)
 
-    print("- Enabling LDO.")
-    configure_ldo(1)
+    print("- Enabling FE LDO.")
+    configure_fe_ldo(1)
+
+    # LDO.
+    def configure_adc_ldo(enable):
+        control_value  = bus.regs.adc_control.read()
+        control_value &= ~(     1 * ADC_CONTROL_LDO_EN)
+        control_value |=  (enable * ADC_CONTROL_LDO_EN)
+        bus.regs.adc_control.write(control_value)
+
+    print("- Enabling ADC LDO.")
+    configure_adc_ldo(1)
 
     # Coupling.
     def configure_coupling(channel, coupling):
