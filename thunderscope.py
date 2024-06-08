@@ -136,7 +136,7 @@ class Platform(XilinxPlatform):
 
         self.toolchain.additional_commands = [
             # Non-Multiboot SPI-Flash bitstream generation.
-            "write_cfgmem -force -format bin -interface spix4 -size 16 -loadbit \"up 0x0 {build_name}_full.bit\" -file {build_name}.bin",
+            #"write_cfgmem -force -format bin -interface spix4 -size 16 -loadbit \"up 0x0 {build_name}_full.bit\" -file {build_name}.bin",
             # Multiboot bitstreams
             "write_bitstream -force -bin_file {build_name}.bit",
             "set_property BITSTREAM.CONFIG.NEXT_CONFIG_ADDR 0x0097FC00 [current_design]",
@@ -216,7 +216,7 @@ class CRG(Module):
 # BaseSoC -----------------------------------------------------------------------------------------
 
 class BaseSoC(SoCMini):
-    def __init__(self, sys_clk_freq=int(125e6),
+    def __init__(self, sys_clk_freq=int(200e6),
         with_pcie     = True,
         with_frontend = True,
         with_adc      = True,
@@ -415,6 +415,10 @@ class BaseSoC(SoCMini):
                     self.adc.source,
                     self.adc.had1511.bitslip,
                     self.adc.had1511.fclk,
+                    #self.i2c.pads.scl,
+                    self.i2c.pads.scl,
+                    self.i2c.pads.sda,
+                    #self.i2c._r.fields.sda,
                 ]
                 self.submodules.analyzer = LiteScopeAnalyzer(analyzer_signals,
                     depth        = 1024,

@@ -165,8 +165,8 @@ def adc_configure(host, port, channel, mode, downsampling):
     configure_pll(1)
 
     print("- Configuring ZL30260 PLL (I2C)...")
-    zl30250 = ZL30260Driver(bus=bus, name="i2c", addr=ZL30260_I2C_ADDR)
-    zl30250.init(config=ZL30260_I2C_CONF, debug=True)
+    zl30260 = ZL30260Driver(bus=bus, name="i2c", addr=ZL30260_I2C_ADDR)
+    zl30260.init(config=ZL30260_I2C_CONF, debug=True)
 
     # PWR_DOWN.
     def configure_pwr_down(enable):
