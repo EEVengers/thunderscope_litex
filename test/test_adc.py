@@ -64,13 +64,23 @@ def afe_configure(host, port, channel, coupling, attenuation):
     print("---------------------------------------")
 
     # LDO.
-    def configure_ldo(enable):
+    def configure_afe_ldo(enable):
         control_value  = bus.regs.frontend_control.read()
         control_value &= ~(     1 * AFE_CONTROL_LDO_EN)
         control_value |=  (enable * AFE_CONTROL_LDO_EN)
         bus.regs.frontend_control.write(control_value)
 
-    print("- Enabling LDO.")
+    print("- Enabling AFE LDO.")
+    configure_afe_ldo(1)
+
+        # LDO.
+    def configure_ldo(enable):
+        control_value  = bus.regs.adc_control.read()
+        control_value &= ~(     1 * ADC_CONTROL_LDO_EN)
+        control_value |=  (enable * ADC_CONTROL_LDO_EN)
+        bus.regs.adc_control.write(control_value)
+
+    print("- Enabling ADC LDO.")
     configure_ldo(1)
 
     # Coupling.
@@ -143,16 +153,6 @@ def adc_configure(host, port, channel, mode, downsampling):
 
     print("Analog to Digital Converter (ADC) Configuration...")
     print("--------------------------------------------------")
-
-    # LDO.
-    def configure_ldo(enable):
-        control_value  = bus.regs.adc_control.read()
-        control_value &= ~(     1 * ADC_CONTROL_LDO_EN)
-        control_value |=  (enable * ADC_CONTROL_LDO_EN)
-        bus.regs.adc_control.write(control_value)
-
-    print("- Enabling ADC LDO.")
-    configure_ldo(1)
 
     # PLL.
     def configure_pll(enable):
