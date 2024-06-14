@@ -19,9 +19,9 @@ from .i2c import *
 #                               D E F I N I T I O N S                                              #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-zl30260_I2C_ADDR = 0x74
-zl30260_I2C_WRITE_COMMAND = 0x02
-zl30260_I2C_CONF = {
+ZL30260_I2C_ADDR = 0x74
+ZL30260_I2C_WRITE_COMMAND = 0x02
+ZL30260_I2C_CONF = {
     # From configuration tool (Reg : Value).
     0x0423 : 0x08,
     0x0003 : 0x01,
@@ -66,7 +66,7 @@ zl30260_I2C_CONF = {
 #                                  S O F T W A R E                                                 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-class zl30260Driver:
+class ZL30260Driver:
     def __init__(self, bus, name, addr):
         self.i2c  = I2CDriver(bus=bus, name=name)
         self.addr = addr
@@ -82,7 +82,7 @@ class zl30260Driver:
                 sys.stdout.flush()
                 self.i2c.start_cond()
                 ack =  self.i2c.write(I2C_W_ADDR(self.addr))
-                ack =  self.i2c.write(zl30260_I2C_WRITE_COMMAND)
+                ack =  self.i2c.write(ZL30260_I2C_WRITE_COMMAND)
                 ack &= self.i2c.write(reg >> 8)
                 ack &= self.i2c.write(reg & 0xFF)
                 ack &= self.i2c.write(value)

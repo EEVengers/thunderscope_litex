@@ -1,0 +1,12 @@
+config,None,data_width,143
+config,None,depth,1024
+config,None,samplerate,250000000
+signal,0,main_adc_source_source_valid0,1
+signal,0,main_adc_source_source_ready0,1
+signal,0,main_adc_source_source_first0,1
+signal,0,main_adc_source_source_last0,1
+signal,0,main_adc_source_source_payload_data0,128
+signal,0,main_adc_had1511_bitslip,1
+signal,0,main_adc_had1511_fclk,8
+signal,0,i2c_scl,1
+signal,0,i2c_sda,1
