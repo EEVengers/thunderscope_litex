@@ -91,20 +91,20 @@ class ZL30260Driver:
             if debug:
                 print("")
         # Verify registers
-        if debug:
-            for reg, value in config.items():
-                self.i2c.start_cond()
-                ack =  self.i2c.write(I2C_W_ADDR(self.addr))
-                ack =  self.i2c.write(ZL30260_I2C_READ_COMMAND)
-                ack &= self.i2c.write(reg >> 8)
-                ack &= self.i2c.write(reg & 0xFF)
-                self.i2c.stop_cond()
-                self.i2c.start_cond()
-                ack =  self.i2c.write(I2C_R_ADDR(self.addr))
-                readBack = self.i2c.read(0)
-                self.i2c.stop_cond()
-                if(readBack == value):
-                    print(f"Read reg 0x{reg:04X} : 0x{readBack:02X}")
-                else:
-                    print(f"Read reg 0x{reg:04X} : 0x{readBack:02X} (expected 0x{value:02X})")
+        # if debug:
+        #     for reg, value in config.items():
+        #         self.i2c.start_cond()
+        #         ack =  self.i2c.write(I2C_W_ADDR(self.addr))
+        #         ack =  self.i2c.write(ZL30260_I2C_READ_COMMAND)
+        #         ack &= self.i2c.write(reg >> 8)
+        #         ack &= self.i2c.write(reg & 0xFF)
+        #         self.i2c.stop_cond()
+        #         self.i2c.start_cond()
+        #         ack =  self.i2c.write(I2C_R_ADDR(self.addr))
+        #         readBack = self.i2c.read(0)
+        #         self.i2c.stop_cond()
+        #         if(readBack == value):
+        #             print(f"Read reg 0x{reg:04X} : 0x{readBack:02X}")
+        #         else:
+        #             print(f"Read reg 0x{reg:04X} : 0x{readBack:02X} (expected 0x{value:02X})")
 

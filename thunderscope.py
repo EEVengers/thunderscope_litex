@@ -136,7 +136,7 @@ class Platform(XilinxPlatform):
 
         self.toolchain.additional_commands = [
             # Non-Multiboot SPI-Flash bitstream generation.
-            "write_cfgmem -force -format bin -interface spix4 -size 16 -loadbit \"up 0x0 {build_name}_full.bit\" -file {build_name}.bin",
+            "write_cfgmem -force -format bin -interface spix4 -size 16 -loadbit \"up 0x0 {build_name}.bit\" -file {build_name}.bin",
             # Multiboot bitstreams
             "write_bitstream -force -bin_file {build_name}.bit",
             "set_property BITSTREAM.CONFIG.NEXT_CONFIG_ADDR 0x0097FC00 [current_design]",
@@ -183,10 +183,10 @@ class CRG(Module):
         platform.add_period_constraint(cfgm_clk, 1e9/65e6)
 
         # PLL.
-        self.submodules.pll = pll = S7PLL(speedgrade=-1)
+        self.submodules.pll = pll = S7PLL(speedgrade=-2)
         self.comb += pll.reset.eq(self.rst)
         pll.register_clkin(platform.request("clk50"), 50e6)
-        pll.create_clkout(self.cd_sys, sys_clk_freq)
+        pll.create_clkout(self.cd_sys, sys_clk_freq, reset_buf="bufg")
         pll.create_clkout(self.cd_idelay, 200e6)
         platform.add_false_path_constraints(self.cd_sys.clk, pll.clkin) # Ignore sys_clk to pll.clkin path created by SoC's rst.
         platform.add_period_constraint(self.cd_sys.clk, 1e9/sys_clk_freq)
@@ -221,7 +221,7 @@ class BaseSoC(SoCMini):
         with_frontend = True,
         with_adc      = True,
         with_jtagbone = True,
-        with_analyzer = True,
+        with_analyzer = False,
     ):
         platform = Platform()
 
