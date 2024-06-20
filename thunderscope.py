@@ -37,8 +37,8 @@ from peripherals.had1511_adc import HAD1511ADC
 from peripherals.trigger import Trigger
 
 # IOs ----------------------------------------------------------------------------------------------
-
-_io = [
+# Trentz A100T/A200T Module
+a7_484_io = [
      # Main system clock. 
     ("clk50", 0,
         Subsignal("p", Pins("H4"), IOStandard("DIFF_SSTL15")),
@@ -69,11 +69,10 @@ _io = [
 
     # Control / Status.
     ("fe_control", 0,
-        Subsignal("fe_en",      Pins("J21"), IOStandard("LVCMOS33")), # TPS7A9101/LDO & LM27761 Enable.
+        Subsignal("fe_en",       Pins("J21"), IOStandard("LVCMOS33")), # TPS7A9101/LDO & LM27761 Enable.
         Subsignal("coupling",    Pins("H20 K19 H19 N18"), IOStandard("LVCMOS33")),
         Subsignal("attenuation", Pins("G20 K18 J19 N19"), IOStandard("LVCMOS33")),
-        # TODO: termination N18 L19 L21 M18
-        IOStandard("LVCMOS33"),
+        Subsignal("term",        Pins("H22 L19 L21 M18"), IOStandard("LVCMOS33"))
     ),
 
     # SPI
@@ -112,6 +111,7 @@ _io = [
         Subsignal("lclk_n", Pins("C19")),
         Subsignal("fclk_p", Pins("D17")), # Frameclock.
         Subsignal("fclk_n", Pins("C17")),
+        # Lane:                D1A D1B D2A D2B D3A D3B D4A D4B
         # Lanes polarity:       X   X       X   X   X   X   X      # (X=Inverted).
         Subsignal("d_p", Pins("A15 B15 B17 A13 F16 D14 E13 F13")), # Data.
         Subsignal("d_n", Pins("A16 B16 B18 A14 E17 D15 E14 F14")),
@@ -124,11 +124,104 @@ _io = [
     ("sync", 0, Pins("Y22"), IOStandard("LVCMOS33"))
 ]
 
+# Custom xc7a50T Module
+a7_325_io = [
+     # Main system clock. 
+    ("clk25", 0,  Pins("P4"), IOStandard("LVCMOS33")),
+
+    # Leds.
+    # -----
+    ("user_led_n", 0, Pins("U17"), IOStandard("LVCMOS33")), # Red.
+
+    # PCIe / Gen2 X4.
+    # ---------------
+    ("pcie_x4", 0,
+        Subsignal("rst_n", Pins("L2"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")),
+        Subsignal("clk_p", Pins("B6")),
+        Subsignal("clk_n", Pins("B5")),
+        Subsignal("rx_p",  Pins("G4 C4 A4 E4")),
+        Subsignal("rx_n",  Pins("G3 C3 A3 E3")),
+        Subsignal("tx_p",  Pins("B2 D2 F2 H2")),
+        Subsignal("tx_n",  Pins("B1 D1 F1 H1")),
+    ),
+
+    # Frontend.
+    # ---------
+
+    # Probe Compensation.
+    ("fe_probe_compensation", 0, Pins("K3"), IOStandard("LVCMOS33")),
+
+    # Control / Status.
+    ("fe_control", 0,
+        Subsignal("fe_en",       Pins("K6"), IOStandard("LVCMOS33")), # TPS7A9101/LDO & LM27761 Enable.
+        Subsignal("coupling",    Pins("N6 M2 T2 M6"), IOStandard("LVCMOS33")),
+        Subsignal("attenuation", Pins("M1 M5 P1 L4"), IOStandard("LVCMOS33")),
+        Subsignal("term",        Pins("P3 N2 P5 J4"), IOStandard("LVCMOS33"))
+    ),
+
+    # SPI
+    ("main_spi", 0,
+        Subsignal("clk",  Pins("K2")),
+        Subsignal("cs_n", Pins("N1 R3 K1 R6 J5")),
+        Subsignal("mosi", Pins("L3")),
+        IOStandard("LVCMOS33"),
+    ),
+
+    # I2C bus.
+    # --------
+    # - Trim DAC (MCP4728 @ 0xC0).
+    # - PLL      (LMK61E2 @ 0x58).
+    # - ClockGen (ZL30250 @ 0xD8).
+    # - TODO: Digi-pot @ 0x58.
+
+    ("i2c", 0,
+        Subsignal("sda", Pins("N4")),
+        Subsignal("scl", Pins("K5")),
+        IOStandard("LVCMOS33"),
+    ),
+
+    # ADC / HMCAD1511.
+    # ----------------
+
+    # Control / Status / SPI.
+    ("adc_control", 0,
+        Subsignal("acq_en", Pins("M4")), # TPS7A9101/LDO Enable.
+        Subsignal("osc_oe", Pins("N3")), # LMK61E2/PLL Output Enable.
+        IOStandard("LVCMOS33"),
+    ),
+    # Datapath.
+    ("adc_data", 0,
+        Subsignal("lclk_p", Pins("R2")), # Bitclock.
+        Subsignal("lclk_n", Pins("R1")),
+        Subsignal("fclk_p", Pins("U2")), # Frameclock.
+        Subsignal("fclk_n", Pins("U1")),
+        # Lane:                D1A D1B D2A D2B D3A D3B D4A D4B
+        # Lanes polarity:               X   X       X   X   X      # (X=Inverted).
+        Subsignal("d_p", Pins("U4  V3  U7  V8  R5  T4  U6  R7")),  # Data.
+        Subsignal("d_n", Pins("V4  V2  V6  V7  T5  T3  U5  T7")),
+        IOStandard("LVDS_25"),
+        Misc("DIFF_TERM=TRUE"),
+    ),
+
+    # SYNC
+    # ----------------
+    ("sync", 0, Pins("P6"), IOStandard("LVCMOS33"))
+]
+
 # Platform -----------------------------------------------------------------------------------------
 
 class Platform(XilinxPlatform):
-    def __init__(self, toolchain="vivado"):
-        XilinxPlatform.__init__(self, "xc7a100tfgg484-2", _io, toolchain=toolchain)
+    device = {
+        "a100t" : {"fpga": "xc7a100tfgg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a100t.bit"},
+        "a200t" : {"fpga": "xc7a200tfbg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a200t.bit"},
+        "a50t"  : {"fpga": "xc7a50tcsg325-2",  "io": a7_325_io, "flash": "bscan_spi_xc7a50t.bit"},
+    }
+    def __init__(self, toolchain="vivado", variant="a100t"):
+
+        XilinxPlatform.__init__(self, 
+                                self.device[variant]["fpga"],
+                                self.device[variant]["io"],
+                                toolchain=toolchain)
 
         self.toolchain.bitstream_commands = [
             "set_property BITSTREAM.CONFIG.SPI_BUSWIDTH 4 [current_design]",
@@ -149,9 +242,9 @@ class Platform(XilinxPlatform):
             "write_cfgmem -force -format mcs -size 32 -interface SPIx4 -loadbit \"up 0x00980000 {build_name}.bit\" {build_name}_update.mcs"
         ]
 
-    def create_programmer(self, name='openocd'):
+    def create_programmer(self, name='openocd', variant="a100t"):
         if name == 'openocd':
-            return OpenOCD("openocd_xc7_ft232.cfg", "bscan_spi_xc7a35t.bit")
+            return OpenOCD("openocd_xc7_ft232.cfg", self.device[variant]["flash"])
         elif name == 'vivado':
             # TODO: some board versions may have s25fl128s
             return VivadoProgrammer(flash_part='s25fl256sxxxxxx0-spi-x1_x2_x4')
@@ -189,7 +282,12 @@ class CRG(Module):
         # PLL.
         self.submodules.pll = pll = S7PLL(speedgrade=-2)
         self.comb += pll.reset.eq(self.rst)
-        pll.register_clkin(platform.request("clk50"), 50e6)
+        # Trenz modules have 50MHz Clock, TS Module has 25MHz Clock
+        clk = platform.request("clk50", loose = True)
+        if clk is not None:
+            pll.register_clkin(clk, 50e6)
+        else:
+            pll.register_clkin(platform.request("clk25"), 25e6)
         pll.create_clkout(self.cd_sys, sys_clk_freq, reset_buf="bufg")
         pll.create_clkout(self.cd_idelay, 200e6)
         platform.add_false_path_constraints(self.cd_sys.clk, pll.clkin) # Ignore sys_clk to pll.clkin path created by SoC's rst.
@@ -221,13 +319,14 @@ class CRG(Module):
 
 class BaseSoC(SoCMini):
     def __init__(self, sys_clk_freq=int(125e6),
+        variant       ="a100t",
         with_pcie     = True,
         with_frontend = True,
         with_adc      = True,
         with_jtagbone = True,
         with_analyzer = False,
     ):
-        platform = Platform()
+        platform = Platform(variant=variant)
 
         # CRG --------------------------------------------------------------------------------------
         self.submodules.crg = CRG(platform, sys_clk_freq)
@@ -440,6 +539,7 @@ def main():
     from litex.soc.integration.soc import LiteXSoCArgumentParser
     parser = LiteXSoCArgumentParser(description="LitePCIe SoC on ThunderScope")
     target_group = parser.add_argument_group(title="Target options")
+    target_group.add_argument("--variant",   default="a100t",     help="Board variant (a200t, a100t or a50t).")
     target_group.add_argument("--build",     action="store_true", help="Build bitstream.")
     target_group.add_argument("--load",      action="store_true", help="Load bitstream.")
     target_group.add_argument("--flash",     action="store_true", help="Flash bitstream.")
@@ -447,7 +547,7 @@ def main():
     args = parser.parse_args()
 
     # Build SoC.
-    soc = BaseSoC()
+    soc = BaseSoC(variant = args.variant)
 
     builder  = Builder(soc, csr_csv="test/csr.csv")
     builder.build(run=args.build)
@@ -463,7 +563,7 @@ def main():
 
     # Flash Bitstream.
     if args.flash:
-        prog = soc.platform.create_programmer("vivado")
+        prog = soc.platform.create_programmer(name="vivado", variant = args.variant)
         prog.flash(0, builder.get_bitstream_filename(mode="flash"))
 
 if __name__ == "__main__":
