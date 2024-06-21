@@ -200,7 +200,7 @@ a7_325_io = [
         Subsignal("d_p", Pins("U4  V3  U7  V8  R5  T4  U6  R7")),  # Data.
         Subsignal("d_n", Pins("V4  V2  V6  V7  T5  T3  U5  T7")),
         IOStandard("LVDS_25"),
-        Misc("DIFF_TERM=TRUE"),
+        Misc("DIFF_TERM=FALSE"),
     ),
 
     # SYNC
@@ -251,7 +251,7 @@ class Platform(XilinxPlatform):
 
     def do_finalize(self, fragment):
         XilinxPlatform.do_finalize(self, fragment)
-        self.add_period_constraint(self.lookup_request("adc_data:lclk_p", loose=True), 1e9/1000e6)
+        self.add_period_constraint(self.lookup_request("adc_data:lclk_p", loose=True), 2e9/1000e6)
 
 # CRG ----------------------------------------------------------------------------------------------
 
@@ -444,7 +444,7 @@ class BaseSoC(SoCMini):
 
             class ADC(Module, AutoCSR):
                 def __init__(self, control_pads, data_pads, sys_clk_freq,
-                    data_width   = 128
+                    data_width   = 128, data_polarity = [1, 1, 0, 1, 1, 1, 1, 1]
                 ):
 
                     # Control/Status.
@@ -487,7 +487,7 @@ class BaseSoC(SoCMini):
                     self.submodules.trigger = Trigger()
 
                     # HAD1511.
-                    self.submodules.had1511 = HAD1511ADC(data_pads, sys_clk_freq, lanes_polarity=[1, 1, 0, 1, 1, 1, 1, 1])
+                    self.submodules.had1511 = HAD1511ADC(data_pads, sys_clk_freq, lanes_polarity=data_polarity)
 
                     # Gate/Data-Width Converter.
                     self.submodules.gate = stream.Gate([("data", 64)], sink_ready_when_disabled=True)
@@ -502,10 +502,15 @@ class BaseSoC(SoCMini):
                         self.source
                     )
 
+            adc_polarity = {"a100t" : [1, 1, 0, 1, 1, 1, 1, 1],
+                            "a200t" : [1, 1, 0, 1, 1, 1, 1, 1],
+                            "a50t"  : [0, 0, 1, 1, 0, 1, 1, 1]}
+
             self.submodules.adc = ADC(
                 control_pads = platform.request("adc_control"),
                 data_pads    = platform.request("adc_data"),
                 sys_clk_freq = sys_clk_freq,
+                data_polarity=adc_polarity[variant]
             )
 
             # ADC -> PCIe.
