@@ -318,7 +318,7 @@ class CRG(Module):
 # BaseSoC -----------------------------------------------------------------------------------------
 
 class BaseSoC(SoCMini):
-    def __init__(self, sys_clk_freq=int(125e6),
+    def __init__(self, sys_clk_freq=int(175e6),
         variant       ="a100t",
         with_pcie     = True,
         with_frontend = True,
