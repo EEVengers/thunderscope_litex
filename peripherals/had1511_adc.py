@@ -249,9 +249,11 @@ class HAD1511ADC(Module, AutoCSR):
         # ----------------------
 
         self.submodules.cdc = stream.ClockDomainCrossing(
-            layout  = [("data", nchannels*8)],
-            cd_from = "adc_frame" if pads is not None else clock_domain,
-            cd_to   = clock_domain
+            layout   = [("data", nchannels*8)],
+            cd_from  = "adc_frame" if pads is not None else clock_domain,
+            cd_to    = clock_domain,
+            buffered = True,
+            depth    = 256
         )
         self.comb += self.adc_source.connect(self.cdc.sink)
 

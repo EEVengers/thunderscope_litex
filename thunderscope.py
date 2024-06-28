@@ -318,7 +318,7 @@ class CRG(Module):
 # BaseSoC -----------------------------------------------------------------------------------------
 
 class BaseSoC(SoCMini):
-    def __init__(self, sys_clk_freq=int(175e6),
+    def __init__(self, sys_clk_freq=int(150e6),
         variant       ="a100t",
         with_pcie     = True,
         with_frontend = True,
@@ -362,7 +362,7 @@ class BaseSoC(SoCMini):
                 data_width = 128,
                 bar0_size  = 0x20000
             )
-            self.add_pcie(phy=self.pcie_phy, ndmas=1, dma_buffering_depth=8192, max_pending_requests=4)
+            self.add_pcie(phy=self.pcie_phy, ndmas=1, dma_buffering_depth=1024*16, max_pending_requests=4)
             # FIXME: Apply it to all targets (integrate it in LitePCIe?).
             #platform.toolchain.pre_placement_commands.add("set_clock_groups -group [get_clocks {sys_clk}] -group [get_clocks userclk2] -asynchronous", sys_clk=self.crg.cd_sys.clk)
             #platform.toolchain.pre_placement_commands.add("set_clock_groups -group [get_clocks {sys_clk}] -group [get_clocks clk_125mhz] -asynchronous", sys_clk=self.crg.cd_sys.clk)
