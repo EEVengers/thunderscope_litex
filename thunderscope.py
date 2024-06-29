@@ -516,13 +516,6 @@ class BaseSoC(SoCMini):
             # ADC -> PCIe.
             self.comb += self.adc.source.connect(self.pcie_dma0.sink)
 
-            # ADC Debug
-            clk_count = Signal(32)
-            clk_div = platform.request("sync")
-            self.sync.adc_test += clk_count.eq(clk_count + 1)
-            # self.sync.adc += clk_count.eq(clk_count + 1)
-            self.comb += clk_div.eq(clk_count[8])
-
             # Analyzer -----------------------------------------------------------------------------
 
             if with_analyzer:

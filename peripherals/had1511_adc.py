@@ -96,7 +96,6 @@ class HAD1511ADC(Module, AutoCSR):
         if pads is not None:
             self.clock_domains.cd_adc       = ClockDomain() # ADC Bitclock.
             self.clock_domains.cd_adc_frame = ClockDomain() # ADC Frameclock (freq : ADC Bitclock/8).
-            self.clock_domains.cd_adc_test = ClockDomain() # ADC Test Clock
             adc_clk = Signal()
             self.specials += Instance("IBUFDS",
                 i_I  = pads.lclk_p,
@@ -111,10 +110,6 @@ class HAD1511ADC(Module, AutoCSR):
                 p_BUFR_DIVIDE = "4",
                 i_I = adc_clk,
                 o_O = ClockSignal("adc_frame")
-            )
-            self.specials += Instance("BUFG",
-                i_I = adc_clk,
-                o_O = ClockSignal("adc_test")
             )
             self.specials += AsyncResetSynchronizer(self.cd_adc_frame, self._control.fields.frame_rst)
 
