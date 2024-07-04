@@ -70,15 +70,15 @@ a7_484_io = [
     # Control / Status.
     ("fe_control", 0,
         Subsignal("fe_en",       Pins("J21"), IOStandard("LVCMOS33")), # TPS7A9101/LDO & LM27761 Enable.
-        Subsignal("coupling",    Pins("H20 K19 H19 N18"), IOStandard("LVCMOS33")),
-        Subsignal("attenuation", Pins("G20 K18 J19 N19"), IOStandard("LVCMOS33")),
-        Subsignal("term",        Pins("H22 L19 L21 M18"), IOStandard("LVCMOS33"))
+        Subsignal("coupling",    Pins("N18 H19 K19 H20"), IOStandard("LVCMOS33")),
+        Subsignal("attenuation", Pins("N19 J19 K18 G20"), IOStandard("LVCMOS33")),
+        Subsignal("term",        Pins("M18 L21 L19 H22"), IOStandard("LVCMOS33"))
     ),
 
     # SPI
     ("main_spi", 0,
         Subsignal("clk",  Pins("K21")),
-        Subsignal("cs_n", Pins("J22 L20 M21 L18 K13")),
+        Subsignal("cs_n", Pins("L18 M21 L20 J22 K13")),
         Subsignal("mosi", Pins("K22")),
         IOStandard("LVCMOS33"),
     ),
@@ -154,15 +154,15 @@ a7_325_io = [
     # Control / Status.
     ("fe_control", 0,
         Subsignal("fe_en",       Pins("K6"), IOStandard("LVCMOS33")), # TPS7A9101/LDO & LM27761 Enable.
-        Subsignal("coupling",    Pins("N6 M2 T2 M6"), IOStandard("LVCMOS33")),
-        Subsignal("attenuation", Pins("M1 M5 P1 L4"), IOStandard("LVCMOS33")),
-        Subsignal("term",        Pins("P3 N2 P5 J4"), IOStandard("LVCMOS33"))
+        Subsignal("coupling",    Pins("M6 T2 M2 N6"), IOStandard("LVCMOS33")),
+        Subsignal("attenuation", Pins("L4 P1 M5 M1"), IOStandard("LVCMOS33")),
+        Subsignal("term",        Pins("J4 P5 N2 P3"), IOStandard("LVCMOS33"))
     ),
 
     # SPI
     ("main_spi", 0,
         Subsignal("clk",  Pins("K2")),
-        Subsignal("cs_n", Pins("N1 R3 K1 R6 J5")),
+        Subsignal("cs_n", Pins("R6 K1 R3 N1 J5")),
         Subsignal("mosi", Pins("L3")),
         IOStandard("LVCMOS33"),
     ),
