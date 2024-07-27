@@ -362,12 +362,7 @@ class BaseSoC(SoCMini):
                 data_width = 128,
                 bar0_size  = 0x20000
             )
-            self.add_pcie(phy=self.pcie_phy, ndmas=1, dma_buffering_depth=1024*16, max_pending_requests=4)
-            # FIXME: Apply it to all targets (integrate it in LitePCIe?).
-            #platform.toolchain.pre_placement_commands.add("set_clock_groups -group [get_clocks {sys_clk}] -group [get_clocks userclk2] -asynchronous", sys_clk=self.crg.cd_sys.clk)
-            #platform.toolchain.pre_placement_commands.add("set_clock_groups -group [get_clocks {sys_clk}] -group [get_clocks clk_125mhz] -asynchronous", sys_clk=self.crg.cd_sys.clk)
-            #platform.toolchain.pre_placement_commands.add("set_clock_groups -group [get_clocks {sys_clk}] -group [get_clocks clk_250mhz] -asynchronous", sys_clk=self.crg.cd_sys.clk)
-            #platform.toolchain.pre_placement_commands.add("set_clock_groups -group [get_clocks clk_125mhz] -group [get_clocks clk_250mhz] -asynchronous")
+            self.add_pcie(phy=self.pcie_phy, ndmas=1, dma_buffering_depth=1024*16, max_pending_requests=4, address_width=64)
 
             # ICAP (For FPGA reload over PCIe).
             from litex.soc.cores.icap import ICAP
@@ -520,9 +515,7 @@ class BaseSoC(SoCMini):
 
             if with_analyzer:
                 analyzer_signals = [
-                    self.adc.source,
-                    self.adc.had1511.bitslip,
-                    self.adc.had1511.fclk,
+                    self.adc.source
                 ]
                 self.submodules.analyzer = LiteScopeAnalyzer(analyzer_signals,
                     depth        = 1024,
