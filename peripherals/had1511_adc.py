@@ -12,6 +12,8 @@ from migen.genlib.resetsync import AsyncResetSynchronizer
 
 from migen.genlib.misc import WaitTimer
 
+from litex.gen import *
+
 from litex.soc.interconnect.csr import *
 from litex.soc.interconnect import stream
 
@@ -54,9 +56,28 @@ HAD1511_ADC_GAIN_9DB = 9
 
 had1511_phy_layout = ["fclk_p", "fclk_n", "lclk_p", "lclk_n", "d_p", "d_n"]
 
+# Shuffler -----------------------------------------------------------------------------------------
+
+class ADCByteShuffle(Module):
+    def __init__(self, num_shuffle, byte_swap = []):
+        self.sink   = sink   = stream.Endpoint([("data", len(byte_swap[0])*8)])
+        self.source = source = stream.Endpoint([("data", len(byte_swap[0])*8)])
+
+        self.shuffle = Signal(num_shuffle)
+
+        self.comb += sink.connect(source)
+
+        for i in range(len(byte_swap[0])):
+            cases = {}            
+            for idx, swap in enumerate(byte_swap):
+                cases[idx] = self.source.data[i*8:(i+1)*8].eq(self.sink.data[swap[i]*8:(swap[i]+1)*8])
+
+            self.comb += Case(self.shuffle, cases)
+
+
 # HAD1511 ADC --------------------------------------------------------------------------------------
 
-class HAD1511ADC(Module, AutoCSR):
+class HAD1511ADC(LiteXModule):
     def __init__(self, pads, sys_clk_freq, lanes_polarity=[0]*8, clock_domain="sys"):
         # Parameters.
         if pads is not None:
@@ -86,6 +107,15 @@ class HAD1511ADC(Module, AutoCSR):
         ])
         self._bitslip_count = CSRStatus(32, description="ADC bitslip count (with rollover).")
         self._sample_count  = CSRStatus(32, description="ADC samples count since last stat_rst.")
+        self._data_channels = CSRStorage(fields=[
+            CSRField("shuffle",     offset=0, size=2, reset=0, description="Number of enabled channels to control shuffling of samples",
+                    values=[
+                        (0, "Passthrough"),
+                        (1, "2-Channel Shuffling"),
+                        (2, "4-Channel Shuffling")
+                    ]),
+            CSRField("run_length",  offset=2, size=6, reset=1, description="Control Run-Length of samples for each channel ordered next to each other")
+        ])
 
         # # #
 
@@ -252,11 +282,24 @@ class HAD1511ADC(Module, AutoCSR):
         )
         self.comb += self.adc_source.connect(self.cdc.sink)
 
+        # Shuffler.
+        # ---------
+
+        # Data from the HMCAD1520 comes in the order [1 1 2 2 3 3 4 4] for 4-channel operation
+        #  and [1 1 1 1 2 2 2 2] for 2-channel operation.  Shuffle the data so the output data
+        #  stream is [1 2 3 4 1 2 3 4] and [1 2 1 2 1 2 1 2] respectively.
+        
+        self.adc_shuffler = ADCByteShuffle(3, byte_swap=[[0, 1, 2, 3, 4, 5, 6, 7],
+                                                         [0, 4, 1, 5, 2, 6, 3, 7],
+                                                         [0, 2, 4, 6, 1, 3, 5, 7]])
+        self.comb += self.adc_shuffler.shuffle.eq(self._data_channels.fields.shuffle)
+        self.comb += self.cdc.source.connect(self.adc_shuffler.sink)
+
         # DownSampling.
         # -------------
 
         self.submodules.downsampling = DownSampling(ratio=self._downsampling.storage)
-        self.comb += self.cdc.source.connect(self.downsampling.sink)
+        self.comb += self.adc_shuffler.source.connect(self.downsampling.sink)
         self.comb += self.downsampling.source.connect(source)
         self.comb += self.downsampling.source.ready.eq(1) # No backpressure allowed.
 
