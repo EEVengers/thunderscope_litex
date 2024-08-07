@@ -413,8 +413,12 @@ class BaseSoC(SoCMini):
                             ("``0b1``", "DC-Coupling (one bit per channel)."),
                         ]),
                         CSRField("attenuation",  offset=16, size=4, description="Frontend Attenuation.", values=[
-                            ("``0b0``", " 1X-Attenuation (one bit per channel)."),
-                            ("``0b1``", "10X-Attenuation (one bit per channel)."),
+                            ("``0b0``", "50X-Attenuation (one bit per channel)."),
+                            ("``0b1``", " 1X-Attenuation (one bit per channel)."),
+                        ]),
+                        CSRField("termination",  offset=24, size=4, description="Frontend Termination.", values=[
+                            ("``0b0``", "1MOhm Termination (one bit per channel)."),
+                            ("``0b1``", "50Ohm Termination (one bit per channel)."),
                         ]),
                     ])
                     # # #
@@ -427,6 +431,9 @@ class BaseSoC(SoCMini):
 
                     # Attenuation.
                     self.comb += control_pads.attenuation.eq(self._control.fields.attenuation)
+
+                    # Termination.
+                    self.comb += control_pads.term.eq(self._control.fields.termination)
 
 
             self.submodules.frontend = Frontend(
