@@ -36,8 +36,14 @@ $ sudo ./litex_setup.py init install
 [> Build and Load the bitstream
 --------------------------------
 ```sh
-$ ./thunderscope --driver --build --load
+$ ./thunderscope --variant=a200t --driver --build --load
 ```
+
+| Variant Arg | Target                   |
+| :---------: | :----------------------: |
+| `a200t`     | Trenz TE0712 200T Module |
+| `a100t`     | Trenz TE0712 100T Module |
+| `a50t`      | Custom Rev2 A50T Module  |
 
 [> Open LiteX server
 --------------------
