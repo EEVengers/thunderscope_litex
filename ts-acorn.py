@@ -27,45 +27,20 @@ from litex.soc.cores.pwm import PWM
 from litepcie.phy.s7pciephy import S7PCIEPHY
 from litepcie.software import generate_litepcie_software
 
-
 from litescope import LiteScopeAnalyzer
 
 from peripherals.had1511_adc import HAD1511ADC
 from peripherals.trigger import Trigger
 
-
-# CRG ----------------------------------------------------------------------------------------------
-
-class CRG(LiteXModule):
-    def __init__(self, platform, sys_clk_freq):
-        self.rst          = Signal()
-        self.cd_sys       = ClockDomain()
-        self.cd_idelay    = ClockDomain()
-        self.cd_adc_frame = ClockDomain() # ADC Frameclock (freq : ADC Bitclock/8).
-
-        # Clk/Rst
-        clk200 = platform.request("clk200")
-
-        # PLL
-        self.pll = pll = S7PLL()
-        self.comb += pll.reset.eq(self.rst)
-        pll.register_clkin(clk200, 200e6)
-        pll.create_clkout(self.cd_sys,       sys_clk_freq)
-        pll.create_clkout(self.cd_idelay,    200e6)
-        platform.add_false_path_constraints(self.cd_sys.clk, pll.clkin) # Ignore sys_clk to pll.clkin path created by SoC's rst.re sys_clk to pll.clkin path created by SoC's rst.
-        platform.add_period_constraint(self.cd_sys.clk, 1e9/sys_clk_freq)
-        platform.add_period_constraint(self.cd_idelay.clk, 1e9/200e6)
-
-        #self.idelayctrl = S7IDELAYCTRL(self.cd_idelay)
-
+# IOs ----------------------------------------------------------------------------------------------
 # GPIO
 _spi_io = [   
     # SPI.
-    ("test_spi", 0,
+    ("main_spi", 0,
         Subsignal("clk",  Pins("J2")),
         Subsignal("mosi", Pins("J5"), Misc("PULLUP True")),
         Subsignal("cs_n", Pins("H5"), Misc("PULLUP True")),
-        Subsignal("miso", Pins("K2"), Misc("PULLUP True")),
+        # Subsignal("miso", Pins("K2"), Misc("PULLUP True")),
         Misc("SLEW=FAST"),
         IOStandard("LVCMOS33")
     )
@@ -79,76 +54,127 @@ _i2c_io = [
     )
 ]
 
+_fe_comp_io = [
+    # Probe Compensation.
+    ("fe_probe_compensation", 0, Pins("K2"), IOStandard("LVCMOS33")),
+
+]
+
+# CRG ----------------------------------------------------------------------------------------------
+
+class CRG(LiteXModule):
+    def __init__(self, platform, sys_clk_freq):
+        self.rst          = Signal()
+        self.cd_sys       = ClockDomain()
+        self.cd_idelay    = ClockDomain()
+
+        # Clk/Rst
+        clk200 = platform.request("clk200")
+
+        # PLL.
+        self.submodules.pll = pll = S7PLL(speedgrade=-2)
+        self.comb += pll.reset.eq(self.rst)
+        pll.register_clkin(clk200, 200e6)
+        pll.create_clkout(self.cd_sys, sys_clk_freq, reset_buf="bufg")
+        pll.create_clkout(self.cd_idelay, 200e6)
+        platform.add_false_path_constraints(self.cd_sys.clk, pll.clkin) # Ignore sys_clk to pll.clkin path created by SoC's rst.
+        platform.add_period_constraint(self.cd_sys.clk, 1e9/sys_clk_freq)
+        platform.add_period_constraint(self.cd_idelay.clk, 1e9/200e6)
+
+        # self.submodules.idelayctrl = S7IDELAYCTRL(self.cd_idelay)
+
 # BaseSoC -----------------------------------------------------------------------------------------
 
 class BaseSoC(SoCMini):
-    def __init__(self, variant="cle-215+", sys_clk_freq=int(125e6),
+    def __init__(self, variant="cle-215+", sys_clk_freq=int(150e6),
         with_led_chaser = True,
-        with_pcie       = False,
+        with_pcie     = True,
         with_frontend = True,
         with_adc      = True,
         with_jtagbone = True,
-        with_analyzer = True,
+        with_analyzer = False,
         **kwargs):
         platform = sqrl_acorn.Platform(variant=variant)
 
         # CRG --------------------------------------------------------------------------------------
-        self.crg = CRG(platform, sys_clk_freq)
+        self.submodules.crg = CRG(platform, sys_clk_freq)
 
         # SoCCore ----------------------------------------------------------------------------------
-        SoCMini.__init__(self, platform, sys_clk_freq, ident="LiteX Thunderscope on Acorn CLE-101/215(+)")
+        SoCMini.__init__(self, platform, sys_clk_freq,
+            ident="LiteX Thunderscope on Acorn CLE-101/215(+)",
+            ident_version = True,
+        )
 
         # JTAGBone ---------------------------------------------------------------------------------
         if with_jtagbone:
             self.add_jtagbone()
 
         # XADC -------------------------------------------------------------------------------------
-        self.xadc = XADC()
+        self.submodules.xadc = XADC()
 
         # DNA --------------------------------------------------------------------------------------
-        self.dna = DNA()
+        self.submodules.dna = DNA()
         self.dna.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
 
         # Leds -------------------------------------------------------------------------------------
-        self.leds = LedChaser(
+        self.submodules.leds = LedChaser(
             pads         = platform.request_all("user_led"),
             sys_clk_freq = sys_clk_freq)
 
         # PCIe -------------------------------------------------------------------------------------
         if with_pcie:
             self.comb += platform.request("pcie_clkreq_n").eq(0)
-            self.pcie_phy = S7PCIEPHY(platform, platform.request("pcie_x4"),
+            self.submodules.pcie_phy = S7PCIEPHY(platform, platform.request("pcie_x4"),
                 data_width = 128,
-                bar0_size  = 0x20000)
-            self.add_pcie(phy=self.pcie_phy, ndmas=1, max_pending_requests=8,
-                          dma_buffering_depth=4096, address_width=64)
-            # self.add_pcie(phy=self.pcie_phy, ndmas=1, address_width=64)
-            platform.add_period_constraint(self.crg.cd_sys.clk, 1e9/sys_clk_freq)
+                bar0_size  = 0x20000
+            )
+            self.add_pcie(phy=self.pcie_phy, ndmas=1, dma_buffering_depth=1024*16, max_pending_requests=4, address_width=64)
 
             # ICAP (For FPGA reload over PCIe).
             from litex.soc.cores.icap import ICAP
-            self.icap = ICAP()
+            self.submodules.icap = ICAP()
             self.icap.add_reload()
             self.icap.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
 
-            # Flash (For SPIFlash update over PCIe).
-            from litex.soc.cores.gpio import GPIOOut
-            from litex.soc.cores.spi_flash import S7SPIFlash
-            self.flash_cs_n = GPIOOut(platform.request("flash_cs_n"))
-            self.flash      = S7SPIFlash(platform.request("flash"), sys_clk_freq, 25e6)
+            # # Flash (For SPIFlash update over PCIe).
+            # from litex.soc.cores.gpio import GPIOOut
+            # from litex.soc.cores.spi_flash import S7SPIFlash
+            # self.flash_cs_n = GPIOOut(platform.request("flash_cs_n"))
+            # self.flash      = S7SPIFlash(platform.request("flash"), sys_clk_freq, 25e6)
 
         
         # I2C Bus:
         # - Trim DAC (MCP4728 @ 0x61).
         # - PLL      (LMK61E2 @ 0x58).
         platform.add_extension(_i2c_io)
-        self.submodules.i2c = I2CMaster(platform.request("test_i2c"))
+        self.submodules.i2c = I2CMaster(platform.request("test_i2c"))        
+
+        # Probe Compensation.
+        platform.add_extension(_fe_comp_io)
+        self.submodules.probe_compensation = PWM(
+            pwm = platform.request("fe_probe_compensation"),
+            default_enable = 1,
+            default_width  = int(1e-3*sys_clk_freq/2),
+            default_period = int(1e-3*sys_clk_freq)
+        )
+
+        platform.add_extension(_spi_io)
+        main_spi_pads = platform.request("main_spi")
+        main_spi_clk_freq = 1e6
+        main_spi_pads.miso = Signal()
+        self.submodules.main_spi = main_spi = SPIMaster(
+            pads         = main_spi_pads,
+            data_width   = 24,
+            sys_clk_freq = sys_clk_freq,
+            spi_clk_freq = main_spi_clk_freq
+        )
+
 
         # Frontend.
         if with_frontend:
 
             class Frontend(Module, AutoCSR):
-                def __init__(self, control_pads, pga_spi_pads, sys_clk_freq, pga_spi_clk_freq=1e6):
+                def __init__(self, control_pads, sys_clk_freq):
                     # Control/Status.
                     self._control = CSRStorage(fields=[
                         CSRField("fe_en", offset=0, size=1, description="Frontend LDO-Enable.", values=[
@@ -175,32 +201,19 @@ class BaseSoC(SoCMini):
 
                         # Attenuation.
                         self.comb += control_pads.attenuation.eq(self._control.fields.attenuation)
- 
-                    # Programmable Gain Amplifier (LMH6518/SPI).
-                    if pga_spi_pads is not None:
-                        pga_spi_pads.miso = Signal()
-                    self.submodules.spi = SPIMaster(
-                        pads         = pga_spi_pads,
-                        data_width   = 24,
-                        sys_clk_freq = sys_clk_freq,
-                        spi_clk_freq = pga_spi_clk_freq
-                    )
+
 
             self.submodules.frontend = Frontend(
                 control_pads     = None,
-                pga_spi_pads     = None,
                 sys_clk_freq     = sys_clk_freq,
-                pga_spi_clk_freq = 1e6,
             )
-
 
         # ADC.
         if with_adc:
 
             class ADC(Module, AutoCSR):
-                def __init__(self, control_pads, status_pads, spi_pads, data_pads, sys_clk_freq,
-                    data_width   = 128,
-                    spi_clk_freq = 1e6
+                def __init__(self, control_pads, data_pads, sys_clk_freq,
+                    data_width   = 128, data_polarity = [1, 1, 0, 1, 1, 1, 1, 1]
                 ):
 
                     # Control/Status.
@@ -237,22 +250,13 @@ class BaseSoC(SoCMini):
                             control_pads.osc_oe.eq(self._control.fields.osc_en),
                         ]
 
-                    # # SPI.
-                    # spi_pads.miso = Signal()
-                    # self.submodules.spi = SPIMaster(
-                    #     pads         = spi_pads,
-                    #     data_width   = 24,
-                    #     sys_clk_freq = sys_clk_freq,
-                    #     spi_clk_freq = spi_clk_freq
-                    # )
-
                     # Data-Path --------------------------------------------------------------------
 
                     # Trigger.
                     self.submodules.trigger = Trigger()
 
                     # HAD1511.
-                    self.submodules.had1511 = HAD1511ADC(data_pads, sys_clk_freq, lanes_polarity=[1, 1, 0, 1, 1, 1, 1, 1])
+                    self.submodules.had1511 = HAD1511ADC(data_pads, sys_clk_freq, lanes_polarity=data_polarity)
 
                     # Gate/Data-Width Converter.
                     self.submodules.gate = stream.Gate([("data", 64)], sink_ready_when_disabled=True)
@@ -269,11 +273,8 @@ class BaseSoC(SoCMini):
                     
             self.submodules.adc = ADC(
                 control_pads = None,
-                status_pads  = None, #platform.request("adc_status"),
-                spi_pads     = None,
                 data_pads    = None,
                 sys_clk_freq = sys_clk_freq,
-                spi_clk_freq = 1e6,
             )
 
             # ADC -> PCIe.
@@ -292,30 +293,25 @@ class BaseSoC(SoCMini):
                     csr_csv      = "test/analyzer.csv"
                 )
 
+# Build --------------------------------------------------------------------------------------------
+
 def main():
     from litex.build.parser import LiteXArgumentParser
     parser = LiteXArgumentParser(platform=sqrl_acorn.Platform, description="LiteX SoC on Acorn CLE-101/215(+).")
     parser.add_target_argument("--flash",           action="store_true",       help="Flash bitstream.")
     parser.add_target_argument("--variant",         default="cle-215+",        help="Board variant (cle-215+, cle-215 or cle-101).")
-    parser.add_target_argument("--sys-clk-freq",    default=100e6, type=float, help="System clock frequency.")
     pcieopts = parser.target_group.add_mutually_exclusive_group()
-    pcieopts.add_argument("--with-pcie",            action="store_true", help="Enable PCIe support.")
     parser.add_target_argument("--driver",          action="store_true", help="Generate PCIe driver.")
-    parser.add_target_argument("--with-spi-sdcard", action="store_true", help="Enable SPI-mode SDCard support (requires SDCard adapter on P2).")
-    pcieopts.add_argument("--with-sata",            action="store_true", help="Enable SATA support (over PCIe2SATA).")
     args = parser.parse_args()
 
     soc = BaseSoC(
         variant         = args.variant,
-        sys_clk_freq    = args.sys_clk_freq,
         with_led_chaser =True,
-        with_pcie       = args.with_pcie,
+        with_pcie       = True,
         with_frontend   = True,
         with_adc        = True,
         **parser.soc_argdict
     )
-    if args.with_spi_sdcard:
-        soc.add_spi_sdcard()
 
     builder  = Builder(soc, **parser.builder_argdict)
     if args.build:

@@ -19,9 +19,10 @@ from .i2c import *
 #                               D E F I N I T I O N S                                              #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-zl30260_I2C_ADDR = 0x74
-zl30260_I2C_WRITE_COMMAND = 0x02
-zl30260_I2C_CONF = {
+ZL30260_I2C_ADDR = 0x74
+ZL30260_I2C_WRITE_COMMAND = 0x02
+ZL30260_I2C_READ_COMMAND = 0x03
+ZL30260_I2C_CONF = {
     # From configuration tool (Reg : Value).
     0x0423 : 0x08,
     0x0003 : 0x01,
@@ -66,7 +67,7 @@ zl30260_I2C_CONF = {
 #                                  S O F T W A R E                                                 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-class zl30260Driver:
+class ZL30260Driver:
     def __init__(self, bus, name, addr):
         self.i2c  = I2CDriver(bus=bus, name=name)
         self.addr = addr
@@ -74,7 +75,7 @@ class zl30260Driver:
     def init(self, config, debug=False):
         for reg, value in config.items():
             if debug:
-                print(f"0x{reg:02x}", end="")
+                print(f"0x{ZL30260_I2C_WRITE_COMMAND:02x} 0x{reg:04x} : 0x{value:02x}", end="")
             ack = 0
             while (not ack):
                 if debug:
@@ -82,10 +83,28 @@ class zl30260Driver:
                 sys.stdout.flush()
                 self.i2c.start_cond()
                 ack =  self.i2c.write(I2C_W_ADDR(self.addr))
-                ack =  self.i2c.write(zl30260_I2C_WRITE_COMMAND)
+                ack =  self.i2c.write(ZL30260_I2C_WRITE_COMMAND)
                 ack &= self.i2c.write(reg >> 8)
                 ack &= self.i2c.write(reg & 0xFF)
                 ack &= self.i2c.write(value)
                 self.i2c.stop_cond()
             if debug:
                 print("")
+        # Verify registers
+        # if debug:
+        #     for reg, value in config.items():
+        #         self.i2c.start_cond()
+        #         ack =  self.i2c.write(I2C_W_ADDR(self.addr))
+        #         ack =  self.i2c.write(ZL30260_I2C_READ_COMMAND)
+        #         ack &= self.i2c.write(reg >> 8)
+        #         ack &= self.i2c.write(reg & 0xFF)
+        #         self.i2c.stop_cond()
+        #         self.i2c.start_cond()
+        #         ack =  self.i2c.write(I2C_R_ADDR(self.addr))
+        #         readBack = self.i2c.read(0)
+        #         self.i2c.stop_cond()
+        #         if(readBack == value):
+        #             print(f"Read reg 0x{reg:04X} : 0x{readBack:02X}")
+        #         else:
+        #             print(f"Read reg 0x{reg:04X} : 0x{readBack:02X} (expected 0x{value:02X})")
+

@@ -3,7 +3,7 @@ BSD 2-Clause License
 Copyright (c) 2024, Enjoy-Digital
 Copyright (c) 2024, EEVengers
 Copyright (c) 2024, John Simons
-Copyright (c) 2024, Nate Meyers
+Copyright (c) 2024, Nate Meyer
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
