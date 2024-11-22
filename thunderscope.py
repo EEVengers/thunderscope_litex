@@ -23,7 +23,7 @@ from litex.soc.cores.clock import *
 from litex.soc.cores.led import LedChaser
 from litex.soc.cores.xadc import XADC
 from litex.soc.cores.dna  import DNA
-from litex.soc.cores.bitbang import I2CMaster
+from litex.soc.cores.i2c import I2CMaster
 from litex.soc.cores.gpio import GPIOOut
 from litex.soc.cores.spi import SPIMaster
 from litex.soc.cores.pwm import PWM
