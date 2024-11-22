@@ -12,7 +12,7 @@ from migen import *
 
 from litex.build.generic_platform import *
 from litex.build.xilinx import XilinxPlatform, VivadoProgrammer
-from litex.build.openocd import OpenOCD
+from litex.build.openfpgaloader import OpenFPGALoader
 
 from litex.soc.interconnect.csr import *
 from litex.soc.integration.soc_core import *
@@ -242,9 +242,13 @@ class Platform(XilinxPlatform):
             "write_cfgmem -force -format mcs -size 32 -interface SPIx4 -loadbit \"up 0x00980000 {build_name}.bit\" {build_name}_update.mcs"
         ]
 
-    def create_programmer(self, name='openocd', variant="a100t"):
-        if name == 'openocd':
-            return OpenOCD("openocd_xc7_ft232.cfg", self.device[variant]["flash"])
+    def create_programmer(self, name='openfpgaloader', variant="a100t"):
+        if name == 'openfpgaloader':
+            if variant == 'a50t':
+                return OpenFPGALoader(fpga_part="xc7a50tcsg324", cable="digilent_hs2")
+            else:
+                return OpenFPGALoader(fpga_part="xc7"+variant+"fgg484", cable="digilent_hs2")
+
         elif name == 'vivado':
             # TODO: some board versions may have s25fl128s
             return VivadoProgrammer(flash_part='s25fl256sxxxxxx0-spi-x1_x2_x4')
@@ -556,12 +560,12 @@ def main():
 
     # Load Bistream.
     if args.load:
-        prog = soc.platform.create_programmer()
+        prog = soc.platform.create_programmer(name="openfpgaloader", variant = args.variant)
         prog.load_bitstream(builder.get_bitstream_filename(mode="sram"))
 
     # Flash Bitstream.
     if args.flash:
-        prog = soc.platform.create_programmer(name="vivado", variant = args.variant)
+        prog = soc.platform.create_programmer(name="openfpgaloader", variant = args.variant)
         prog.flash(0, builder.get_bitstream_filename(mode="flash"))
 
 if __name__ == "__main__":
