@@ -23,10 +23,10 @@ from litex.soc.cores.clock import *
 from litex.soc.cores.led import LedChaser
 from litex.soc.cores.xadc import XADC
 from litex.soc.cores.dna  import DNA
-from litex.soc.cores.i2c import I2CMaster
-from litex.soc.cores.gpio import GPIOOut
 from litex.soc.cores.spi import SPIMaster
 from litex.soc.cores.pwm import PWM
+
+from litei2c import LiteI2C
 
 from litepcie.phy.s7pciephy import S7PCIEPHY
 from litepcie.software import generate_litepcie_software
@@ -85,11 +85,6 @@ a7_484_io = [
 
     # I2C bus.
     # --------
-    # - Trim DAC (MCP4728 @ 0xC0).
-    # - PLL      (LMK61E2 @ 0x58).
-    # - ClockGen (ZL30250 @ 0xD8).
-    # - TODO: Digi-pot @ 0x58.
-
     ("i2c", 0,
         Subsignal("sda", Pins("J14")),
         Subsignal("scl", Pins("H14")),
@@ -169,11 +164,6 @@ a7_325_io = [
 
     # I2C bus.
     # --------
-    # - Trim DAC (MCP4728 @ 0xC0).
-    # - PLL      (LMK61E2 @ 0x58).
-    # - ClockGen (ZL30250 @ 0xD8).
-    # - TODO: Digi-pot @ 0x58.
-
     ("i2c", 0,
         Subsignal("sda", Pins("N4")),
         Subsignal("scl", Pins("K5")),
@@ -380,9 +370,11 @@ class BaseSoC(SoCMini):
         # Frontend / ADC ---------------------------------------------------------------------------
 
         # I2C Bus:
-        # - Trim DAC (MCP4728 @ 0x61).
-        # - PLL      (LMK61E2 @ 0x58).
-        self.i2c = I2CMaster(platform.request("i2c"))
+        # - Trim DAC (MCP4728 @ 0x60).
+        # - PLL      (ZL30260 @ 0x74).
+        # - Digi-pot (MCP4432 @ 0x2C).
+        # # #
+        self.submodules.i2c = LiteI2C(sys_clk_freq=sys_clk_freq, pads=platform.request("i2c"))
 
         # Probe Compensation.
         self.submodules.probe_compensation = PWM(
@@ -529,7 +521,6 @@ class BaseSoC(SoCMini):
 
             if with_analyzer:
                 analyzer_signals = [
-                    self.adc.source
                 ]
                 self.submodules.analyzer = LiteScopeAnalyzer(analyzer_signals,
                     depth        = 1024,
