@@ -23,7 +23,7 @@ This repo is for now a WIP.
 [> Prerequisites
 ----------------
 - Python3, Vivado WebPACK
-- Either a Vivado-compatible JTAG cable (native or XVCD), or OpenOCD.
+- Either a Vivado-compatible JTAG cable (native or XVCD), or OpenFPGALoader.
 
 [> Installing LiteX
 -------------------
@@ -77,3 +77,29 @@ $ ./test_adc.py --channels=1 --mode=ramp --afe-coupling=DC --afe-attenuation=10X
 $ ./test_glscopeclient.py
 $ glscopeclient --debug myscope:enjoy-digital:lan:127.0.0.1
 ```
+
+[> Flash Firmware Layout
+------------------------
+
+The Trenz A100T and A200T modules include a 256Mb SPI Flash chip, the A50T/A35T builds use a 32Mb SPI Flash.  The larger chips' bitstream does not fit into the flash used on the smaller design, therefore we have two Flash partition tables.
+
+A35T/A50T (0x80_0000):
+
+| Address Range          | Content                   |
+| :--------------------: | :-----------------        |
+| 0x000000 - 0x27FFFF    | Factory Bitstream*        |
+| 0x280000 - 0x3FFFFF    | Factory Calibration Data* |
+| 0x400000 - 0x67FFFF    | Primary Bitstream         |
+| 0x680000 - 0x7FFFFF    | Available for User Data   |
+
+A100T/A200T (0x400_0000):
+
+| Address Range          | Content                   |
+| :--------------------: | :-----------------        |
+| 0x0000000 - 0x0FFFFFF  | Factory Bitstream*        |
+| 0x1000000 - 0x1FFFFFF  | Factory Calibration Data* |
+| 0x2000000 - 0x2FFFFFF  | Primary Bitstream         |
+| 0x3000000 - 0x3FFFFFF  | Available for User Data   |
+
+
+\* Write Protected

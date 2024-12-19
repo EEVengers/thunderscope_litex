@@ -4,11 +4,15 @@
 # This file is part of Thunderscope-LiteX project.
 #
 # Copyright (c) 2022 Florent Kermarrec <florent@enjoy-digital.fr>
+# Copyright (c) 2024 Nate Meyer <nate.devel@gmail.com>
 # SPDX-License-Identifier: BSD-2-Clause
 
 import os
+import subprocess
 
 from migen import *
+
+from litex.gen import *
 
 from litex.build.generic_platform import *
 from litex.build.xilinx import XilinxPlatform, VivadoProgrammer
@@ -17,7 +21,9 @@ from litex.build.openfpgaloader import OpenFPGALoader
 from litex.soc.interconnect.csr import *
 from litex.soc.integration.soc_core import *
 from litex.soc.integration.builder import *
+from litex.soc.integration.soc import *
 from litex.soc.interconnect import stream
+from litex.soc.interconnect import wishbone
 
 from litex.soc.cores.clock import *
 from litex.soc.cores.led import LedChaser
@@ -28,6 +34,9 @@ from litex.soc.cores.pwm import PWM
 
 from litei2c import LiteI2C
 
+from litespi.modules import S25FL256S1, MX25U6435E
+from litespi.opcodes import SpiNorFlashOpCodes as Codes
+
 from litepcie.phy.s7pciephy import S7PCIEPHY
 from litepcie.software import generate_litepcie_software
 
@@ -35,6 +44,14 @@ from litescope import LiteScopeAnalyzer
 
 from peripherals.had1511_adc import HAD1511ADC
 from peripherals.trigger import Trigger
+
+
+def get_commit_hash_string():
+    # Get the hash for the current commit
+    commit_hash = subprocess.check_output(['git', 'rev-parse', 'HEAD']).strip().decode('ascii')
+    # Check if the repo is dirty
+    repo_dirty = bool(subprocess.check_output(['git', 'status', '--porcelain']).decode('ascii').strip())
+    return commit_hash, repo_dirty
 
 # IOs ----------------------------------------------------------------------------------------------
 # Trentz A100T/A200T Module
@@ -48,6 +65,15 @@ a7_484_io = [
     # Leds.
     # -----
     ("user_led_n", 0, Pins("T21"), IOStandard("LVCMOS33")), # Red.
+
+    # SPI Flash.
+    # ----------
+    ("spiflash4x", 0,
+        Subsignal("cs_n", Pins("T19")),
+        # Subsignal("clk",  Pins("L12")),
+        Subsignal("dq",   Pins("P22 R22 P21 R21")),
+        IOStandard("LVCMOS33")
+    ),
 
     # PCIe / Gen2 X4.
     # ---------------
@@ -128,6 +154,15 @@ a7_325_io = [
     # -----
     ("user_led_n", 0, Pins("U17"), IOStandard("LVCMOS33")), # Red.
 
+    # SPI Flash.
+    # ----------
+    ("spiflash4x", 0,
+        Subsignal("cs_n", Pins("L15")),
+        # Subsignal("clk",  Pins("L12")),
+        Subsignal("dq",   Pins("K16 L17 J15 J16")),
+        IOStandard("LVCMOS33")
+    ),
+
     # PCIe / Gen2 X4.
     # ---------------
     ("pcie_x4", 0,
@@ -205,6 +240,7 @@ class Platform(XilinxPlatform):
         "a100t" : {"fpga": "xc7a100tfgg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a100t.bit"},
         "a200t" : {"fpga": "xc7a200tfbg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a200t.bit"},
         "a50t"  : {"fpga": "xc7a50tcsg325-2",  "io": a7_325_io, "flash": "bscan_spi_xc7a50t.bit"},
+        "a35t"  : {"fpga": "xc7a35tcsg325-2",  "io": a7_325_io, "flash": "bscan_spi_xc7a35t.bit"},
     }
     def __init__(self, toolchain="vivado", variant="a100t"):
 
@@ -234,7 +270,9 @@ class Platform(XilinxPlatform):
 
     def create_programmer(self, name='openfpgaloader', variant="a100t", cable="digilent_hs2"):
         if name == 'openfpgaloader':
-            if variant == 'a50t':
+            if variant == 'a35t':
+                return OpenFPGALoader(fpga_part="xc7a35tcsg324", cable=cable)
+            elif variant == 'a50t':
                 return OpenFPGALoader(fpga_part="xc7a50tcsg324", cable=cable)
             elif variant == 'a100t':
                 return OpenFPGALoader(fpga_part="xc7a100tfgg484", cable=cable)
@@ -260,21 +298,21 @@ class CRG(Module):
         self.clock_domains.cd_idelay = ClockDomain()
 
         # CFGM Clk ~65MHz.
-        cfgm_clk      = Signal()
-        cfgm_clk_freq = int(65e6)
-        self.specials += Instance("STARTUPE2",
-            i_CLK       = 0,
-            i_GSR       = 0,
-            i_GTS       = 0,
-            i_KEYCLEARB = 1,
-            i_PACK      = 0,
-            i_USRCCLKO  = cfgm_clk,
-            i_USRCCLKTS = 0,
-            i_USRDONEO  = 1,
-            i_USRDONETS = 1,
-            o_CFGMCLK   = cfgm_clk
-        )
-        platform.add_period_constraint(cfgm_clk, 1e9/65e6)
+        # cfgm_clk      = Signal()
+        # cfgm_clk_freq = int(65e6)
+        # self.specials += Instance("STARTUPE2",
+        #     i_CLK       = 0,
+        #     i_GSR       = 0,
+        #     i_GTS       = 0,
+        #     i_KEYCLEARB = 1,
+        #     i_PACK      = 0,
+        #     i_USRCCLKO  = cfgm_clk,
+        #     i_USRCCLKTS = 0,
+        #     i_USRDONEO  = 1,
+        #     i_USRDONETS = 1,
+        #     o_CFGMCLK   = cfgm_clk
+        # )
+        # platform.add_period_constraint(cfgm_clk, 1e9/65e6)
 
         # PLL.
         self.submodules.pll = pll = S7PLL(speedgrade=-2)
@@ -315,9 +353,27 @@ class CRG(Module):
 # BaseSoC -----------------------------------------------------------------------------------------
 
 class BaseSoC(SoCMini):
+    SoCCore.csr_map = {
+        "pcie_phy": 0,
+        "pcie_msi": 1,
+        "pcie_endpoint": 2,
+        "pcie_dma0": 3,
+        "ctrl": 4,
+        "spiflash_core": 5,
+        "spiflash_phy": 6,
+        "icap": 7,
+        "dna": 8,
+        "identifier_mem": 9,
+        "xadc": 10,
+    }
+    SoCCore.mem_map = {
+        "csr": 0x0000_0000,
+        "ota": 0x0001_0000,
+        "spiflash": 0x1000_0000
+    }
+
     def __init__(self, sys_clk_freq=int(150e6),
         variant       ="a100t",
-        with_pcie     = True,
         with_frontend = True,
         with_adc      = True,
         with_jtagbone = True,
@@ -329,8 +385,11 @@ class BaseSoC(SoCMini):
         self.submodules.crg = CRG(platform, sys_clk_freq)
 
         # SoCMini ----------------------------------------------------------------------------------
+        commit, dirty = get_commit_hash_string()
+        if dirty:
+            commit = commit[0:8] + "-dirty"
         SoCMini.__init__(self, platform, sys_clk_freq,
-            ident         = "LitePCIe SoC on ThunderScope",
+            ident         = f"LitePCIe SoC on ThunderScope ({commit})",
             ident_version = True,
         )
 
@@ -354,18 +413,40 @@ class BaseSoC(SoCMini):
         self.leds.add_pwm(default_width=128, default_period=1024) # Default to 1/8 to reduce brightness.
 
         # PCIe -------------------------------------------------------------------------------------
-        if with_pcie:
-            self.submodules.pcie_phy = S7PCIEPHY(platform, platform.request("pcie_x4"),
-                data_width = 128,
-                bar0_size  = 0x20000
-            )
-            self.add_pcie(phy=self.pcie_phy, ndmas=1, dma_buffering_depth=1024*16, max_pending_requests=4, address_width=64)
+        self.submodules.pcie_phy = S7PCIEPHY(platform, platform.request("pcie_x4"),
+            data_width = 128,
+            bar0_size  = 0x2_0000
+        )
+        self.add_pcie(phy=self.pcie_phy, ndmas=1, dma_buffering_depth=1024*16,
+                      max_pending_requests=4, address_width=64)
 
-            # ICAP (For FPGA reload over PCIe).
-            from litex.soc.cores.icap import ICAP
-            self.submodules.icap = ICAP()
-            self.icap.add_reload()
-            self.icap.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
+
+        # SPI Flash --------------------------------------------------------------------------------
+        spi_flash_modules = {
+            "a100t": lambda: S25FL256S1(Codes.READ_1_1_4, program_cmd=Codes.PP_1_1_4),
+            "a200t": lambda: S25FL256S1(Codes.READ_1_1_4, program_cmd=Codes.PP_1_1_4),
+            "a50t":  lambda: MX25U6435E(Codes.READ_1_1_4, program_cmd=Codes.PP_1_1_4),
+            "a35t":  lambda: MX25U6435E(Codes.READ_1_1_4, program_cmd=Codes.PP_1_1_4)
+        }
+        self.add_spi_flash(mode="4x", module=spi_flash_modules[variant](), clk_freq=65e6,
+                           rate="1:1", with_mmap=True, with_master=True, with_mmap_write="csr")
+
+        # # QSPI Flash Adapter -----------------------------------------------------------------------
+        pcie_wb = wishbone.Interface(bursting=True)
+        self.submodules.wbremap = wishbone.Remapper(
+            master = self.bus.masters["pcie_mmap"],
+            slave=pcie_wb,
+            src_regions = [SoCRegion(origin=self.mem_map.get("ota", None), size=0x1_0000)],
+            dst_regions = [SoCRegion(origin=self.mem_map.get("spiflash", None), size=0x80_0000)]
+        )
+        self.bus.masters["pcie_mmap"] = pcie_wb
+
+
+        # ICAP (For FPGA reload over PCIe) ---------------------------------------------------------
+        from litex.soc.cores.icap import ICAP
+        self.submodules.icap = ICAP()
+        self.icap.add_reload()
+        self.icap.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
 
         # Frontend / ADC ---------------------------------------------------------------------------
 
@@ -505,7 +586,8 @@ class BaseSoC(SoCMini):
 
             adc_polarity = {"a100t" : [1, 1, 0, 1, 1, 1, 1, 1],
                             "a200t" : [1, 1, 0, 1, 1, 1, 1, 1],
-                            "a50t"  : [0, 0, 1, 1, 0, 1, 1, 1]}
+                            "a50t"  : [0, 0, 1, 1, 0, 1, 1, 1],
+                            "a35t"  : [0, 0, 1, 1, 0, 1, 1, 1]}
 
             self.submodules.adc = ADC(
                 control_pads = platform.request("adc_control"),
@@ -535,7 +617,7 @@ def main():
     from litex.soc.integration.soc import LiteXSoCArgumentParser
     parser = LiteXSoCArgumentParser(description="LitePCIe SoC on ThunderScope")
     target_group = parser.add_argument_group(title="Target options")
-    target_group.add_argument("--variant",   default="a100t",     help="Board variant (a200t, a100t or a50t).")
+    target_group.add_argument("--variant",   default="a100t",     help="Board variant (a200t, a100t, a50t or a35t).")
     target_group.add_argument("--build",     action="store_true", help="Build bitstream.")
     target_group.add_argument("--load",      action="store_true", help="Load bitstream.")
     target_group.add_argument("--flash",     action="store_true", help="Flash bitstream.")
