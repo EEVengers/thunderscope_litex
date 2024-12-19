@@ -42,6 +42,7 @@ from litepcie.software import generate_litepcie_software
 
 from litescope import LiteScopeAnalyzer
 
+from peripherals.windowRemapper import WindowRemapper
 from peripherals.had1511_adc import HAD1511ADC
 from peripherals.trigger import Trigger
 
@@ -354,17 +355,18 @@ class CRG(Module):
 
 class BaseSoC(SoCMini):
     SoCCore.csr_map = {
-        "pcie_phy": 0,
-        "pcie_msi": 1,
-        "pcie_endpoint": 2,
-        "pcie_dma0": 3,
-        "ctrl": 4,
-        "spiflash_core": 5,
-        "spiflash_phy": 6,
-        "icap": 7,
-        "dna": 8,
-        "identifier_mem": 9,
-        "xadc": 10,
+        "dna": 0,
+        "identifier_mem": 1,
+        "pcie_phy": 2,
+        "pcie_msi": 3,
+        "pcie_endpoint": 4,
+        "pcie_dma0": 5,
+        "ctrl": 6,
+        "spiflash_core": 7,
+        "spiflash_phy": 8,
+        "flash_adapter": 9,
+        "icap": 10,
+        "xadc": 11,
     }
     SoCCore.mem_map = {
         "csr": 0x0000_0000,
@@ -388,8 +390,10 @@ class BaseSoC(SoCMini):
         commit, dirty = get_commit_hash_string()
         if dirty:
             commit = commit[0:8] + "-dirty"
+        else:
+            commit = commit[0:8]
         SoCMini.__init__(self, platform, sys_clk_freq,
-            ident         = f"LitePCIe SoC on ThunderScope ({commit})",
+            ident         = f"LitePCIe SoC on ThunderScope {variant.upper()} ({commit})",
             ident_version = True,
         )
 
@@ -432,15 +436,16 @@ class BaseSoC(SoCMini):
                            rate="1:1", with_mmap=True, with_master=True, with_mmap_write="csr")
 
         # # QSPI Flash Adapter -----------------------------------------------------------------------
-        pcie_wb = wishbone.Interface(bursting=True)
-        self.submodules.wbremap = wishbone.Remapper(
-            master = self.bus.masters["pcie_mmap"],
-            slave=pcie_wb,
+        pcie_translated = wishbone.Interface(bursting=True)
+        pcie_wb = self.bus.masters["pcie_mmap"]
+
+        self.submodules.flash_adapter = WindowRemapper(
+            master = pcie_wb,
+            slave=pcie_translated,
             src_regions = [SoCRegion(origin=self.mem_map.get("ota", None), size=0x1_0000)],
             dst_regions = [SoCRegion(origin=self.mem_map.get("spiflash", None), size=0x80_0000)]
         )
-        self.bus.masters["pcie_mmap"] = pcie_wb
-
+        self.bus.masters["pcie_mmap"] = pcie_translated
 
         # ICAP (For FPGA reload over PCIe) ---------------------------------------------------------
         from litex.soc.cores.icap import ICAP
