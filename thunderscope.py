@@ -443,7 +443,7 @@ class BaseSoC(SoCMini):
             master = pcie_wb,
             slave=pcie_translated,
             src_regions = [SoCRegion(origin=self.mem_map.get("ota", None), size=0x1_0000)],
-            dst_regions = [SoCRegion(origin=self.mem_map.get("spiflash", None), size=0x80_0000)]
+            dst_regions = [SoCRegion(origin=self.mem_map.get("spiflash", None), size=0x200_0000)]
         )
         self.bus.masters["pcie_mmap"] = pcie_translated
 
@@ -608,6 +608,8 @@ class BaseSoC(SoCMini):
 
             if with_analyzer:
                 analyzer_signals = [
+                    self.bus.slaves["spiflash"],
+                    self.bus.masters["pcie_mmap"]
                 ]
                 self.submodules.analyzer = LiteScopeAnalyzer(analyzer_signals,
                     depth        = 1024,

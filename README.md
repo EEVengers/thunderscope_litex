@@ -92,14 +92,14 @@ A35T/A50T (0x80_0000):
 | 0x400000 - 0x67FFFF    | Primary Bitstream         |
 | 0x680000 - 0x7FFFFF    | Available for User Data   |
 
-A100T/A200T (0x400_0000):
+A100T/A200T (0x200_0000):
 
 | Address Range          | Content                   |
 | :--------------------: | :-----------------        |
-| 0x0000000 - 0x0FFFFFF  | Factory Bitstream*        |
-| 0x1000000 - 0x1FFFFFF  | Factory Calibration Data* |
-| 0x2000000 - 0x2FFFFFF  | Primary Bitstream         |
-| 0x3000000 - 0x3FFFFFF  | Available for User Data   |
+| 0x0000000 - 0x0AFFFFF  | Factory Bitstream*        |
+| 0x0B00000 - 0x0FFFFFF  | Factory Calibration Data* |
+| 0x1000000 - 0x1AFFFFF  | Primary Bitstream         |
+| 0x1B00000 - 0x1FFFFFF  | Available for User Data   |
 
 
 \* Write Protected
