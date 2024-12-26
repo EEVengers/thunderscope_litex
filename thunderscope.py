@@ -34,8 +34,10 @@ from litex.soc.cores.pwm import PWM
 
 from litei2c import LiteI2C
 
-from litespi.modules import S25FL256S1, MX25U6435E
+from litespi.modules import MX25U6435E
 from litespi.opcodes import SpiNorFlashOpCodes as Codes
+from litespi.spi_nor_flash_module import SpiNorFlashModule
+from litespi.ids import SpiNorFlashManufacturerIDs
 
 from litepcie.phy.s7pciephy import S7PCIEPHY
 from litepcie.software import generate_litepcie_software
@@ -426,9 +428,26 @@ class BaseSoC(SoCMini):
 
 
         # SPI Flash --------------------------------------------------------------------------------
+        #A100T/A200T
+        class S25FL256S(SpiNorFlashModule):
+            manufacturer_id = SpiNorFlashManufacturerIDs.SPANSION
+            device_id = 0x0219
+            name = "s25fl256s"
+
+            total_size  =   33554432   # bytes
+            page_size   =        256   # bytes
+            total_pages =     131072
+
+            supported_opcodes = [
+                Codes.READ_1_1_4_4B,
+                Codes.PP_1_1_4_4B,
+                Codes.SE_4B,
+            ]
+            dummy_bits = 8
+
         spi_flash_modules = {
-            "a100t": lambda: S25FL256S1(Codes.READ_1_1_4, program_cmd=Codes.PP_1_1_4),
-            "a200t": lambda: S25FL256S1(Codes.READ_1_1_4, program_cmd=Codes.PP_1_1_4),
+            "a100t": lambda: S25FL256S(Codes.READ_1_1_4_4B, program_cmd=Codes.PP_1_1_4_4B, erase_cmd=Codes.SE_4B),
+            "a200t": lambda: S25FL256S(Codes.READ_1_1_4_4B, program_cmd=Codes.PP_1_1_4_4B, erase_cmd=Codes.SE_4B),
             "a50t":  lambda: MX25U6435E(Codes.READ_1_1_4, program_cmd=Codes.PP_1_1_4),
             "a35t":  lambda: MX25U6435E(Codes.READ_1_1_4, program_cmd=Codes.PP_1_1_4)
         }
@@ -608,8 +627,6 @@ class BaseSoC(SoCMini):
 
             if with_analyzer:
                 analyzer_signals = [
-                    self.bus.slaves["spiflash"],
-                    self.bus.masters["pcie_mmap"]
                 ]
                 self.submodules.analyzer = LiteScopeAnalyzer(analyzer_signals,
                     depth        = 1024,

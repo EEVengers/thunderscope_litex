@@ -58,12 +58,12 @@ class WindowRemapper(LiteXModule):
             src_adr = Signal.like(master.adr + adr_shift + 1)
             dst_adr = Signal.like(master.adr + adr_shift + 1)
             active  = Signal()
-            reg = CSRStorage(size=32, reset=0, name=f"window{idx}", description=f"Region {idx} Window Offset")
-            self.windows.append(reg)
-            setattr(self, f"window{idx}", reg)
+            window_reg = CSRStorage(size=32, reset=0, name=f"window{idx}", description=f"Region {idx} Window Offset")
+            self.windows.append(window_reg)
+            setattr(self, f"window{idx}", window_reg)
             self.comb += [
                 src_adr.eq(adr_remap << adr_shift),
-                dst_adr.eq(dst_region.origin + src_adr - src_region.origin + (reg.storage * src_region.size)),
+                dst_adr.eq(dst_region.origin + src_adr - src_region.origin + (window_reg.storage * src_region.size)),
                 active.eq((src_adr >= src_region.origin) & (src_adr < (src_region.origin + src_region.size))),
                 If(active, slave.adr.eq(dst_adr >> adr_shift))
             ]
