@@ -23,10 +23,10 @@ from litex.soc.cores.clock import *
 from litex.soc.cores.led import LedChaser
 from litex.soc.cores.xadc import XADC
 from litex.soc.cores.dna  import DNA
-from litex.soc.cores.bitbang import I2CMaster
-from litex.soc.cores.gpio import GPIOOut
 from litex.soc.cores.spi import SPIMaster
 from litex.soc.cores.pwm import PWM
+
+from litei2c import LiteI2C
 
 from litepcie.phy.s7pciephy import S7PCIEPHY
 from litepcie.software import generate_litepcie_software
@@ -85,11 +85,6 @@ a7_484_io = [
 
     # I2C bus.
     # --------
-    # - Trim DAC (MCP4728 @ 0xC0).
-    # - PLL      (LMK61E2 @ 0x58).
-    # - ClockGen (ZL30250 @ 0xD8).
-    # - TODO: Digi-pot @ 0x58.
-
     ("i2c", 0,
         Subsignal("sda", Pins("J14")),
         Subsignal("scl", Pins("H14")),
@@ -169,11 +164,6 @@ a7_325_io = [
 
     # I2C bus.
     # --------
-    # - Trim DAC (MCP4728 @ 0xC0).
-    # - PLL      (LMK61E2 @ 0x58).
-    # - ClockGen (ZL30250 @ 0xD8).
-    # - TODO: Digi-pot @ 0x58.
-
     ("i2c", 0,
         Subsignal("sda", Pins("N4")),
         Subsignal("scl", Pins("K5")),
@@ -242,13 +232,16 @@ class Platform(XilinxPlatform):
             "write_cfgmem -force -format mcs -size 32 -interface SPIx4 -loadbit \"up 0x00980000 {build_name}.bit\" {build_name}_update.mcs"
         ]
 
-    def create_programmer(self, name='openfpgaloader', variant="a100t"):
+    def create_programmer(self, name='openfpgaloader', variant="a100t", cable="digilent_hs2"):
         if name == 'openfpgaloader':
             if variant == 'a50t':
-                return OpenFPGALoader(fpga_part="xc7a50tcsg324", cable="digilent_hs2")
+                return OpenFPGALoader(fpga_part="xc7a50tcsg324", cable=cable)
+            elif variant == 'a100t':
+                return OpenFPGALoader(fpga_part="xc7a100tfgg484", cable=cable)
+            elif variant == 'a200t':
+                return OpenFPGALoader(fpga_part="xc7a200tfbg484", cable=cable)
             else:
-                return OpenFPGALoader(fpga_part="xc7"+variant+"fgg484", cable="digilent_hs2")
-
+                raise ValueError("Unknown FPGA Variant for flashing")
         elif name == 'vivado':
             # TODO: some board versions may have s25fl128s
             return VivadoProgrammer(flash_part='s25fl256sxxxxxx0-spi-x1_x2_x4')
@@ -377,9 +370,11 @@ class BaseSoC(SoCMini):
         # Frontend / ADC ---------------------------------------------------------------------------
 
         # I2C Bus:
-        # - Trim DAC (MCP4728 @ 0x61).
-        # - PLL      (LMK61E2 @ 0x58).
-        self.i2c = I2CMaster(platform.request("i2c"))
+        # - Trim DAC (MCP4728 @ 0x60).
+        # - PLL      (ZL30260 @ 0x74).
+        # - Digi-pot (MCP4432 @ 0x2C).
+        # # #
+        self.submodules.i2c = LiteI2C(sys_clk_freq=sys_clk_freq, pads=platform.request("i2c"))
 
         # Probe Compensation.
         self.submodules.probe_compensation = PWM(
@@ -526,7 +521,6 @@ class BaseSoC(SoCMini):
 
             if with_analyzer:
                 analyzer_signals = [
-                    self.adc.source
                 ]
                 self.submodules.analyzer = LiteScopeAnalyzer(analyzer_signals,
                     depth        = 1024,
@@ -546,6 +540,7 @@ def main():
     target_group.add_argument("--load",      action="store_true", help="Load bitstream.")
     target_group.add_argument("--flash",     action="store_true", help="Flash bitstream.")
     target_group.add_argument("--driver",    action="store_true", help="Generate PCIe driver.")
+    target_group.add_argument("--cable",    default="digilent_hs2", help="JTAG cable name.")
     args = parser.parse_args()
 
     # Build SoC.
@@ -560,12 +555,12 @@ def main():
 
     # Load Bistream.
     if args.load:
-        prog = soc.platform.create_programmer(name="openfpgaloader", variant = args.variant)
+        prog = soc.platform.create_programmer(name="openfpgaloader", variant = args.variant, cable = args.cable)
         prog.load_bitstream(builder.get_bitstream_filename(mode="sram"))
 
     # Flash Bitstream.
     if args.flash:
-        prog = soc.platform.create_programmer(name="openfpgaloader", variant = args.variant)
+        prog = soc.platform.create_programmer(name="openfpgaloader", variant = args.variant, cable = args.cable)
         prog.flash(0, builder.get_bitstream_filename(mode="flash"))
 
 if __name__ == "__main__":

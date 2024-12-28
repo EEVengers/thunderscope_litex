@@ -33,6 +33,8 @@ $ chmod +x litex_setup.py
 $ sudo ./litex_setup.py init install
 ```
 
+> **Note:** The LiteI2C core used in this design is not currently in the base LiteX install.  You may need to clone the [LiteI2C repo](https://github.com/litex-hub/litei2c) to the directory where LiteX has downloaded, and rerun the `./litex_setup.py install` command.
+
 [> Build and Load the bitstream
 --------------------------------
 ```sh
