@@ -239,53 +239,52 @@ a7_325_io = [
 # Platform -----------------------------------------------------------------------------------------
 
 class Platform(XilinxPlatform):
-    device = {
-        "a100t" : {"fpga": "xc7a100tfgg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a100t.bit"},
-        "a200t" : {"fpga": "xc7a200tfbg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a200t.bit"},
-        "a50t"  : {"fpga": "xc7a50tcsg325-2",  "io": a7_325_io, "flash": "bscan_spi_xc7a50t.bit"},
-        "a35t"  : {"fpga": "xc7a35tcsg325-2",  "io": a7_325_io, "flash": "bscan_spi_xc7a35t.bit"},
+    device_list = {
+        "a100t" : {"fpga": "xc7a100tfgg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a100t.bit", "multiboot_addr": 0x100_0000, "flash_size": 32},
+        "a200t" : {"fpga": "xc7a200tfbg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a200t.bit", "multiboot_addr": 0x100_0000, "flash_size": 32},
+        "a50t"  : {"fpga": "xc7a50tcsg325-2",  "io": a7_325_io, "flash": "bscan_spi_xc7a50t.bit", "multiboot_addr": 0x40_0000, "flash_size": 8},
+        "a35t"  : {"fpga": "xc7a35tcsg325-2",  "io": a7_325_io, "flash": "bscan_spi_xc7a35t.bit", "multiboot_addr": 0x40_0000, "flash_size": 8},
     }
     def __init__(self, toolchain="vivado", variant="a100t"):
 
         XilinxPlatform.__init__(self, 
-                                self.device[variant]["fpga"],
-                                self.device[variant]["io"],
+                                self.device_list[variant]["fpga"],
+                                self.device_list[variant]["io"],
                                 toolchain=toolchain)
 
         self.toolchain.bitstream_commands = [
             "set_property BITSTREAM.CONFIG.SPI_BUSWIDTH 4 [current_design]",
-            "set_property BITSTREAM.CONFIG.CONFIGRATE 16 [current_design]",
+            "set_property BITSTREAM.CONFIG.CONFIGRATE 40 [current_design]",
+            "set_property BITSTREAM.CONFIG.CONFIGFALLBACK ENABLE [current_design]",
             "set_property BITSTREAM.GENERAL.COMPRESS TRUE [current_design]",
             "set_property CFGBVS VCCO [current_design]",
             "set_property CONFIG_VOLTAGE 3.3 [current_design]",
         ]
 
+        if self.device_list[variant]["flash_size"] > 16 :
+            self.toolchain.bitstream_commands.append("set_property BITSTREAM.CONFIG.SPI_32BIT_ADDR YES [current_design]")
+
         self.toolchain.additional_commands = [
             # Non-Multiboot SPI-Flash bitstream generation.
-            "write_cfgmem -force -format bin -interface spix4 -size 16 -loadbit \"up 0x0 {build_name}.bit\" -file {build_name}.bin",
+            f"write_cfgmem -force -format bin -interface spix4 -size {self.device_list[variant]['flash_size']} -loadbit \"up 0x0 {{build_name}}.bit\" -file {{build_name}}.bin",
             # Multiboot bitstreams
-            "write_bitstream -force -bin_file {build_name}.bit",
-            "set_property BITSTREAM.CONFIG.NEXT_CONFIG_ADDR 0x0097FC00 [current_design]",
+            "write_bitstream -force -bin_file {build_name}_update.bit",
+            f"set_property BITSTREAM.CONFIG.NEXT_CONFIG_ADDR 0x{self.device_list[variant]['multiboot_addr']:08X} [current_design]",
             "write_bitstream -force -bin_file {build_name}_gold.bit",
-            "write_cfgmem -force -format mcs -size 32 -interface SPIx4 -loadbit \"up 0x00000000 {build_name}_gold.bit up 0x00980000 {build_name}.bit\" -loaddata \"up 0x0097FC00 ../../../cfg/timer1.bin up 0x01300000 ../../../cfg/timer2.bin\" {build_name}_full.mcs",
-            "write_cfgmem -force -format mcs -size 32 -interface SPIx4 -loadbit \"up 0x00980000 {build_name}.bit\" {build_name}_update.mcs"
+            f"write_cfgmem -force -format mcs -size {self.device_list[variant]['flash_size']} -interface SPIx4 -loadbit \"up 0x00000000 {{build_name}}_gold.bit up 0x{self.device_list[variant]['multiboot_addr']:08X} {{build_name}}_update.bit\" {{build_name}}_full.mcs",
         ]
 
-    def create_programmer(self, name='openfpgaloader', variant="a100t", cable="digilent_hs2"):
-        if name == 'openfpgaloader':
-            if variant == 'a35t':
-                return OpenFPGALoader(fpga_part="xc7a35tcsg324", cable=cable)
-            elif variant == 'a50t':
-                return OpenFPGALoader(fpga_part="xc7a50tcsg324", cable=cable)
-            elif variant == 'a100t':
-                return OpenFPGALoader(fpga_part="xc7a100tfgg484", cable=cable)
-            elif variant == 'a200t':
-                return OpenFPGALoader(fpga_part="xc7a200tfbg484", cable=cable)
-            else:
-                raise ValueError("Unknown FPGA Variant for flashing")
-        elif name == 'vivado':
-            # TODO: some board versions may have s25fl128s
-            return VivadoProgrammer(flash_part='s25fl256sxxxxxx0-spi-x1_x2_x4')
+    def create_programmer(self, variant="a100t", cable="digilent_hs2"):
+        if variant == 'a35t':
+            return OpenFPGALoader(fpga_part="xc7a35tcsg324", cable=cable)
+        elif variant == 'a50t':
+            return OpenFPGALoader(fpga_part="xc7a50tcsg324", cable=cable)
+        elif variant == 'a100t':
+            return OpenFPGALoader(fpga_part="xc7a100tfgg484", cable=cable)
+        elif variant == 'a200t':
+            return OpenFPGALoader(fpga_part="xc7a200tfbg484", cable=cable)
+        else:
+            raise ValueError("Unknown FPGA Variant for flashing", variant)
 
     def do_finalize(self, fragment):
         XilinxPlatform.do_finalize(self, fragment)
@@ -661,13 +660,13 @@ def main():
 
     # Load Bistream.
     if args.load:
-        prog = soc.platform.create_programmer(name="openfpgaloader", variant = args.variant, cable = args.cable)
+        prog = soc.platform.create_programmer(variant = args.variant, cable = args.cable)
         prog.load_bitstream(builder.get_bitstream_filename(mode="sram"))
 
     # Flash Bitstream.
     if args.flash:
-        prog = soc.platform.create_programmer(name="openfpgaloader", variant = args.variant, cable = args.cable)
-        prog.flash(0, builder.get_bitstream_filename(mode="flash"))
+        prog = soc.platform.create_programmer(variant = args.variant, cable = args.cable)
+        prog.flash(0, builder.get_bitstream_filename(mode="flash", ext="_full.mcs"))
 
 if __name__ == "__main__":
     main()
