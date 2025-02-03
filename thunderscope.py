@@ -155,7 +155,7 @@ a7_325_io = [
 
     # Leds.
     # -----
-    ("user_led_n", 0, Pins("U17"), IOStandard("LVCMOS33")), # Red.
+    ("user_led_n", 0, Pins("U17"), IOStandard("SSTL135")), # Red.
 
     # SPI Flash.
     # ----------
@@ -163,7 +163,7 @@ a7_325_io = [
         Subsignal("cs_n", Pins("L15")),
         # Subsignal("clk",  Pins("L12")),
         Subsignal("dq",   Pins("K16 L17 J15 J16")),
-        IOStandard("LVCMOS33")
+        IOStandard("SSTL135_R")
     ),
 
     # PCIe / Gen2 X4.
@@ -240,10 +240,10 @@ a7_325_io = [
 
 class Platform(XilinxPlatform):
     device_list = {
-        "a100t" : {"fpga": "xc7a100tfgg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a100t.bit", "multiboot_addr": 0x100_0000, "flash_size": 32},
-        "a200t" : {"fpga": "xc7a200tfbg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a200t.bit", "multiboot_addr": 0x100_0000, "flash_size": 32},
-        "a50t"  : {"fpga": "xc7a50tcsg325-2",  "io": a7_325_io, "flash": "bscan_spi_xc7a50t.bit", "multiboot_addr": 0x40_0000, "flash_size": 8},
-        "a35t"  : {"fpga": "xc7a35tcsg325-2",  "io": a7_325_io, "flash": "bscan_spi_xc7a35t.bit", "multiboot_addr": 0x40_0000, "flash_size": 8},
+        "a100t" : {"fpga": "xc7a100tfgg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a100t.bit", "multiboot_addr": 0x100_0000, "flash_size": 32, "cfgbvs": "VCCO", "config": "3.3"},
+        "a200t" : {"fpga": "xc7a200tfbg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a200t.bit", "multiboot_addr": 0x100_0000, "flash_size": 32, "cfgbvs": "VCCO", "config": "3.3"},
+        "a50t"  : {"fpga": "xc7a50tcsg325-2",  "io": a7_325_io, "flash": "bscan_spi_xc7a50t.bit", "multiboot_addr": 0x40_0000, "flash_size": 8, "cfgbvs": "GND", "config": "1.8"},
+        "a35t"  : {"fpga": "xc7a35tcsg325-2",  "io": a7_325_io, "flash": "bscan_spi_xc7a35t.bit", "multiboot_addr": 0x40_0000, "flash_size": 8, "cfgbvs": "GND", "config": "1.8"},
     }
     def __init__(self, toolchain="vivado", variant="a100t"):
 
@@ -257,8 +257,8 @@ class Platform(XilinxPlatform):
             "set_property BITSTREAM.CONFIG.CONFIGRATE 40 [current_design]",
             "set_property BITSTREAM.CONFIG.CONFIGFALLBACK ENABLE [current_design]",
             "set_property BITSTREAM.GENERAL.COMPRESS TRUE [current_design]",
-            "set_property CFGBVS VCCO [current_design]",
-            "set_property CONFIG_VOLTAGE 3.3 [current_design]",
+            f"set_property CFGBVS {self.device_list[variant]['cfgbvs']} [current_design]",
+            f"set_property CONFIG_VOLTAGE {self.device_list[variant]['config']} [current_design]",
         ]
 
         if self.device_list[variant]["flash_size"] > 16 :
@@ -276,9 +276,9 @@ class Platform(XilinxPlatform):
 
     def create_programmer(self, variant="a100t", cable="digilent_hs2"):
         if variant == 'a35t':
-            return OpenFPGALoader(fpga_part="xc7a35tcsg324", cable=cable)
+            return OpenFPGALoader(fpga_part="xc7a35tcsg325", cable=cable)
         elif variant == 'a50t':
-            return OpenFPGALoader(fpga_part="xc7a50tcsg324", cable=cable)
+            return OpenFPGALoader(fpga_part="xc7a50tcsg325", cable=cable)
         elif variant == 'a100t':
             return OpenFPGALoader(fpga_part="xc7a100tfgg484", cable=cable)
         elif variant == 'a200t':
