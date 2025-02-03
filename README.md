@@ -33,7 +33,6 @@ $ chmod +x litex_setup.py
 $ sudo ./litex_setup.py init install
 ```
 
-> **Note:** The LiteI2C core used in this design is not currently in the base LiteX install.  You may need to clone the [LiteI2C repo](https://github.com/litex-hub/litei2c) to the directory where LiteX has downloaded, and rerun the `./litex_setup.py install` command.
 
 [> Build and Load the bitstream
 --------------------------------
@@ -84,7 +83,7 @@ $ glscopeclient --debug myscope:enjoy-digital:lan:127.0.0.1
 
 The Trenz A100T and A200T modules include a 256Mb SPI Flash chip, the A50T/A35T builds use a 32Mb SPI Flash.  The larger chips' bitstream does not fit into the flash used on the smaller design, therefore we have two Flash partition tables.
 
-A35T/A50T (0x80_0000):
+**A35T/A50T (0x80_0000):**
 
 | Address Range          | Content                   |
 | :--------------------: | :-----------------        |
@@ -93,7 +92,7 @@ A35T/A50T (0x80_0000):
 | 0x400000 - 0x67FFFF    | Primary Bitstream         |
 | 0x680000 - 0x7FFFFF    | Available for User Data   |
 
-A100T/A200T (0x200_0000):
+**A100T/A200T (0x200_0000):**
 
 | Address Range          | Content                   |
 | :--------------------: | :-----------------        |
