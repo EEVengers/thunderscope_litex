@@ -667,7 +667,7 @@ def main():
     # Flash Bitstream.
     if args.flash:
         prog = soc.platform.create_programmer(variant = args.variant, cable = args.cable)
-        prog.flash(0, builder.get_bitstream_filename(mode="flash", ext="_full.mcs"))
+        prog.flash(0, builder.get_bitstream_filename(mode="flash", ext="_full.bin"))
 
 if __name__ == "__main__":
     main()
