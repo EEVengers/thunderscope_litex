@@ -161,7 +161,7 @@ a7_325_io = [
     # ----------
     ("spiflash4x", 0,
         Subsignal("cs_n", Pins("L15")),
-        # Subsignal("clk",  Pins("L12")),
+        # Subsignal("clk",  Pins("E8")),
         Subsignal("dq",   Pins("K16 L17 J15 J16")),
         IOStandard("SSTL135_R")
     ),
@@ -271,6 +271,7 @@ class Platform(XilinxPlatform):
             "write_bitstream -force -bin_file {build_name}_update.bit",
             f"set_property BITSTREAM.CONFIG.NEXT_CONFIG_ADDR 0x{self.device_list[variant]['multiboot_addr']:08X} [current_design]",
             "write_bitstream -force -bin_file {build_name}_gold.bit",
+            f"write_cfgmem -force -format bin -size {self.device_list[variant]['flash_size']} -interface SPIx4 -loadbit \"up 0x00000000 {{build_name}}_gold.bit up 0x{self.device_list[variant]['multiboot_addr']:08X} {{build_name}}_update.bit\" {{build_name}}_full.bin",
             f"write_cfgmem -force -format mcs -size {self.device_list[variant]['flash_size']} -interface SPIx4 -loadbit \"up 0x00000000 {{build_name}}_gold.bit up 0x{self.device_list[variant]['multiboot_addr']:08X} {{build_name}}_update.bit\" {{build_name}}_full.mcs",
         ]
 
