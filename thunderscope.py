@@ -279,7 +279,7 @@ class Platform(XilinxPlatform):
         if variant == 'a35t':
             return OpenFPGALoader(fpga_part="xc7a35tcsg325", cable=cable)
         elif variant == 'a50t':
-            return OpenFPGALoader(fpga_part="xc7a50tcsg325", cable=cable)
+            return OpenFPGALoader(fpga_part="xc7a50tcsg325_1v35", cable=cable)
         elif variant == 'a100t':
             return OpenFPGALoader(fpga_part="xc7a100tfgg484", cable=cable)
         elif variant == 'a200t':
