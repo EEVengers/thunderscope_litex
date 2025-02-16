@@ -7,7 +7,7 @@
 # Copyright (c) 2024 Nate Meyer <nate.devel@gmail.com>
 # SPDX-License-Identifier: BSD-2-Clause
 
-import os
+import shutil
 import subprocess
 
 from migen import *
@@ -240,10 +240,10 @@ a7_325_io = [
 
 class Platform(XilinxPlatform):
     device_list = {
-        "a100t" : {"fpga": "xc7a100tfgg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a100t.bit", "multiboot_addr": 0x100_0000, "flash_size": 32, "cfgbvs": "VCCO", "config": "3.3"},
-        "a200t" : {"fpga": "xc7a200tfbg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a200t.bit", "multiboot_addr": 0x100_0000, "flash_size": 32, "cfgbvs": "VCCO", "config": "3.3"},
-        "a50t"  : {"fpga": "xc7a50tcsg325-2",  "io": a7_325_io, "flash": "bscan_spi_xc7a50t.bit", "multiboot_addr": 0x40_0000, "flash_size": 8, "cfgbvs": "GND", "config": "1.8"},
-        "a35t"  : {"fpga": "xc7a35tcsg325-2",  "io": a7_325_io, "flash": "bscan_spi_xc7a35t.bit", "multiboot_addr": 0x40_0000, "flash_size": 8, "cfgbvs": "GND", "config": "1.8"},
+        "a100t" : {"fpga": "xc7a100tfgg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a100t.bit", "multiboot_addr": 0x100_0000, "multiboot_end": 0x1B00000, "flash_size": 32, "cfgbvs": "VCCO", "config": "3.3"},
+        "a200t" : {"fpga": "xc7a200tfbg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a200t.bit", "multiboot_addr": 0x100_0000, "multiboot_end": 0x1B00000, "flash_size": 32, "cfgbvs": "VCCO", "config": "3.3"},
+        "a50t"  : {"fpga": "xc7a50tcsg325-2",  "io": a7_325_io, "flash": "bscan_spi_xc7a50t.bit", "multiboot_addr": 0x40_0000, "multiboot_end": 0x680000, "flash_size": 8, "cfgbvs": "GND", "config": "1.8"},
+        "a35t"  : {"fpga": "xc7a35tcsg325-2",  "io": a7_325_io, "flash": "bscan_spi_xc7a35t.bit", "multiboot_addr": 0x40_0000, "multiboot_end": 0x680000, "flash_size": 8, "cfgbvs": "GND", "config": "1.8"},
     }
     def __init__(self, toolchain="vivado", variant="a100t"):
 
@@ -264,15 +264,20 @@ class Platform(XilinxPlatform):
         if self.device_list[variant]["flash_size"] > 16 :
             self.toolchain.bitstream_commands.append("set_property BITSTREAM.CONFIG.SPI_32BIT_ADDR YES [current_design]")
 
+        # Set the addresses for the Barrier Images
+        barrier_a_addr = self.device_list[variant]['multiboot_addr'] - 0x400
+        barrier_b_addr = self.device_list[variant]['multiboot_end']
+        load_barrier_imgs = f"-loaddata \"up 0x{barrier_a_addr:08X} barrierA.bin up 0x{barrier_b_addr:08X} barrierB.bin\""
+
         self.toolchain.additional_commands = [
             # Non-Multiboot SPI-Flash bitstream generation.
             f"write_cfgmem -force -format bin -interface spix4 -size {self.device_list[variant]['flash_size']} -loadbit \"up 0x0 {{build_name}}.bit\" -file {{build_name}}.bin",
             # Multiboot bitstreams
             "write_bitstream -force -bin_file {build_name}_update.bit",
-            f"set_property BITSTREAM.CONFIG.NEXT_CONFIG_ADDR 0x{self.device_list[variant]['multiboot_addr']:08X} [current_design]",
+            f"set_property BITSTREAM.CONFIG.NEXT_CONFIG_ADDR 0x{barrier_a_addr:08X} [current_design]",
             "write_bitstream -force -bin_file {build_name}_gold.bit",
-            f"write_cfgmem -force -format bin -size {self.device_list[variant]['flash_size']} -interface SPIx4 -loadbit \"up 0x00000000 {{build_name}}_gold.bit up 0x{self.device_list[variant]['multiboot_addr']:08X} {{build_name}}_update.bit\" {{build_name}}_full.bin",
-            f"write_cfgmem -force -format mcs -size {self.device_list[variant]['flash_size']} -interface SPIx4 -loadbit \"up 0x00000000 {{build_name}}_gold.bit up 0x{self.device_list[variant]['multiboot_addr']:08X} {{build_name}}_update.bit\" {{build_name}}_full.mcs",
+            f"write_cfgmem -force -format bin -size {self.device_list[variant]['flash_size']} -interface SPIx4 -loadbit \"up 0x00000000 {{build_name}}_gold.bit up 0x{self.device_list[variant]['multiboot_addr']:08X} {{build_name}}_update.bit\" {load_barrier_imgs} {{build_name}}_full.bin",
+            f"write_cfgmem -force -format mcs -size {self.device_list[variant]['flash_size']} -interface SPIx4 -loadbit \"up 0x00000000 {{build_name}}_gold.bit up 0x{self.device_list[variant]['multiboot_addr']:08X} {{build_name}}_update.bit\" {load_barrier_imgs} {{build_name}}_full.mcs",
         ]
 
     def create_programmer(self, variant="a100t", cable="digilent_hs2"):
@@ -653,6 +658,8 @@ def main():
     soc = BaseSoC(variant = args.variant)
 
     builder  = Builder(soc, csr_csv="test/csr.csv")
+    shutil.copyfile(f"bin/barrierA.bin", f"{builder.gateware_dir}/barrierA.bin")
+    shutil.copyfile(f"bin/barrierB.bin", f"{builder.gateware_dir}/barrierB.bin")
     builder.build(run=args.build)
 
     # Generate LitePCIe Driver.
