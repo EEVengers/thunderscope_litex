@@ -7,7 +7,7 @@
 # Copyright (c) 2024 Nate Meyer <nate.devel@gmail.com>
 # SPDX-License-Identifier: BSD-2-Clause
 
-import shutil
+import shutil, os
 import subprocess
 
 from migen import *
@@ -658,6 +658,7 @@ def main():
     soc = BaseSoC(variant = args.variant)
 
     builder  = Builder(soc, csr_csv="test/csr.csv")
+    os.makedirs(builder.gateware_dir, exist_ok=True)
     shutil.copyfile(f"bin/barrierA.bin", f"{builder.gateware_dir}/barrierA.bin")
     shutil.copyfile(f"bin/barrierB.bin", f"{builder.gateware_dir}/barrierB.bin")
     builder.build(run=args.build)
