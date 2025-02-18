@@ -4,11 +4,15 @@
 # This file is part of Thunderscope-LiteX project.
 #
 # Copyright (c) 2022 Florent Kermarrec <florent@enjoy-digital.fr>
+# Copyright (c) 2024 Nate Meyer <nate.devel@gmail.com>
 # SPDX-License-Identifier: BSD-2-Clause
 
-import os
+import shutil, os
+import subprocess
 
 from migen import *
+
+from litex.gen import *
 
 from litex.build.generic_platform import *
 from litex.build.xilinx import XilinxPlatform, VivadoProgrammer
@@ -17,7 +21,9 @@ from litex.build.openfpgaloader import OpenFPGALoader
 from litex.soc.interconnect.csr import *
 from litex.soc.integration.soc_core import *
 from litex.soc.integration.builder import *
+from litex.soc.integration.soc import *
 from litex.soc.interconnect import stream
+from litex.soc.interconnect import wishbone
 
 from litex.soc.cores.clock import *
 from litex.soc.cores.led import LedChaser
@@ -28,13 +34,27 @@ from litex.soc.cores.pwm import PWM
 
 from litei2c import LiteI2C
 
+from litespi.modules import MX25U6435E
+from litespi.opcodes import SpiNorFlashOpCodes as Codes
+from litespi.spi_nor_flash_module import SpiNorFlashModule
+from litespi.ids import SpiNorFlashManufacturerIDs
+
 from litepcie.phy.s7pciephy import S7PCIEPHY
 from litepcie.software import generate_litepcie_software
 
 from litescope import LiteScopeAnalyzer
 
+from peripherals.windowRemapper import WindowRemapper
 from peripherals.had1511_adc import HAD1511ADC
 from peripherals.trigger import Trigger
+
+
+def get_commit_hash_string():
+    # Get the hash for the current commit
+    commit_hash = subprocess.check_output(['git', 'rev-parse', 'HEAD']).strip().decode('ascii')
+    # Check if the repo is dirty
+    repo_dirty = bool(subprocess.check_output(['git', 'status', '--porcelain']).decode('ascii').strip())
+    return commit_hash, repo_dirty
 
 # IOs ----------------------------------------------------------------------------------------------
 # Trentz A100T/A200T Module
@@ -48,6 +68,15 @@ a7_484_io = [
     # Leds.
     # -----
     ("user_led_n", 0, Pins("T21"), IOStandard("LVCMOS33")), # Red.
+
+    # SPI Flash.
+    # ----------
+    ("spiflash4x", 0,
+        Subsignal("cs_n", Pins("T19")),
+        # Subsignal("clk",  Pins("L12")),
+        Subsignal("dq",   Pins("P22 R22 P21 R21")),
+        IOStandard("LVCMOS33")
+    ),
 
     # PCIe / Gen2 X4.
     # ---------------
@@ -126,7 +155,16 @@ a7_325_io = [
 
     # Leds.
     # -----
-    ("user_led_n", 0, Pins("U17"), IOStandard("LVCMOS33")), # Red.
+    ("user_led_n", 0, Pins("U17"), IOStandard("SSTL135")), # Red.
+
+    # SPI Flash.
+    # ----------
+    ("spiflash4x", 0,
+        Subsignal("cs_n", Pins("L15")),
+        # Subsignal("clk",  Pins("E8")),
+        Subsignal("dq",   Pins("K16 L17 J15 J16")),
+        IOStandard("SSTL135_R")
+    ),
 
     # PCIe / Gen2 X4.
     # ---------------
@@ -201,50 +239,58 @@ a7_325_io = [
 # Platform -----------------------------------------------------------------------------------------
 
 class Platform(XilinxPlatform):
-    device = {
-        "a100t" : {"fpga": "xc7a100tfgg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a100t.bit"},
-        "a200t" : {"fpga": "xc7a200tfbg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a200t.bit"},
-        "a50t"  : {"fpga": "xc7a50tcsg325-2",  "io": a7_325_io, "flash": "bscan_spi_xc7a50t.bit"},
+    device_list = {
+        "a100t" : {"fpga": "xc7a100tfgg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a100t.bit", "multiboot_addr": 0x100_0000, "multiboot_end": 0x1B00000, "flash_size": 32, "cfgbvs": "VCCO", "config": "3.3"},
+        "a200t" : {"fpga": "xc7a200tfbg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a200t.bit", "multiboot_addr": 0x100_0000, "multiboot_end": 0x1B00000, "flash_size": 32, "cfgbvs": "VCCO", "config": "3.3"},
+        "a50t"  : {"fpga": "xc7a50tcsg325-2",  "io": a7_325_io, "flash": "bscan_spi_xc7a50t.bit", "multiboot_addr": 0x40_0000, "multiboot_end": 0x680000, "flash_size": 8, "cfgbvs": "GND", "config": "1.8"},
+        "a35t"  : {"fpga": "xc7a35tcsg325-2",  "io": a7_325_io, "flash": "bscan_spi_xc7a35t.bit", "multiboot_addr": 0x40_0000, "multiboot_end": 0x680000, "flash_size": 8, "cfgbvs": "GND", "config": "1.8"},
     }
     def __init__(self, toolchain="vivado", variant="a100t"):
 
         XilinxPlatform.__init__(self, 
-                                self.device[variant]["fpga"],
-                                self.device[variant]["io"],
+                                self.device_list[variant]["fpga"],
+                                self.device_list[variant]["io"],
                                 toolchain=toolchain)
 
         self.toolchain.bitstream_commands = [
             "set_property BITSTREAM.CONFIG.SPI_BUSWIDTH 4 [current_design]",
-            "set_property BITSTREAM.CONFIG.CONFIGRATE 16 [current_design]",
+            "set_property BITSTREAM.CONFIG.CONFIGRATE 40 [current_design]",
+            "set_property BITSTREAM.CONFIG.CONFIGFALLBACK ENABLE [current_design]",
             "set_property BITSTREAM.GENERAL.COMPRESS TRUE [current_design]",
-            "set_property CFGBVS VCCO [current_design]",
-            "set_property CONFIG_VOLTAGE 3.3 [current_design]",
+            f"set_property CFGBVS {self.device_list[variant]['cfgbvs']} [current_design]",
+            f"set_property CONFIG_VOLTAGE {self.device_list[variant]['config']} [current_design]",
         ]
+
+        if self.device_list[variant]["flash_size"] > 16 :
+            self.toolchain.bitstream_commands.append("set_property BITSTREAM.CONFIG.SPI_32BIT_ADDR YES [current_design]")
+
+        # Set the addresses for the Barrier Images
+        barrier_a_addr = self.device_list[variant]['multiboot_addr'] - 0x400
+        barrier_b_addr = self.device_list[variant]['multiboot_end']
+        load_barrier_imgs = f"-loaddata \"up 0x{barrier_a_addr:08X} barrierA.bin up 0x{barrier_b_addr:08X} barrierB.bin\""
 
         self.toolchain.additional_commands = [
             # Non-Multiboot SPI-Flash bitstream generation.
-            "write_cfgmem -force -format bin -interface spix4 -size 16 -loadbit \"up 0x0 {build_name}.bit\" -file {build_name}.bin",
+            f"write_cfgmem -force -format bin -interface spix4 -size {self.device_list[variant]['flash_size']} -loadbit \"up 0x0 {{build_name}}.bit\" -file {{build_name}}.bin",
             # Multiboot bitstreams
-            "write_bitstream -force -bin_file {build_name}.bit",
-            "set_property BITSTREAM.CONFIG.NEXT_CONFIG_ADDR 0x0097FC00 [current_design]",
+            "write_bitstream -force -bin_file {build_name}_update.bit",
+            f"set_property BITSTREAM.CONFIG.NEXT_CONFIG_ADDR 0x{barrier_a_addr:08X} [current_design]",
             "write_bitstream -force -bin_file {build_name}_gold.bit",
-            "write_cfgmem -force -format mcs -size 32 -interface SPIx4 -loadbit \"up 0x00000000 {build_name}_gold.bit up 0x00980000 {build_name}.bit\" -loaddata \"up 0x0097FC00 ../../../cfg/timer1.bin up 0x01300000 ../../../cfg/timer2.bin\" {build_name}_full.mcs",
-            "write_cfgmem -force -format mcs -size 32 -interface SPIx4 -loadbit \"up 0x00980000 {build_name}.bit\" {build_name}_update.mcs"
+            f"write_cfgmem -force -format bin -size {self.device_list[variant]['flash_size']} -interface SPIx4 -loadbit \"up 0x00000000 {{build_name}}_gold.bit up 0x{self.device_list[variant]['multiboot_addr']:08X} {{build_name}}_update.bit\" {load_barrier_imgs} {{build_name}}_full.bin",
+            f"write_cfgmem -force -format mcs -size {self.device_list[variant]['flash_size']} -interface SPIx4 -loadbit \"up 0x00000000 {{build_name}}_gold.bit up 0x{self.device_list[variant]['multiboot_addr']:08X} {{build_name}}_update.bit\" {load_barrier_imgs} {{build_name}}_full.mcs",
         ]
 
-    def create_programmer(self, name='openfpgaloader', variant="a100t", cable="digilent_hs2"):
-        if name == 'openfpgaloader':
-            if variant == 'a50t':
-                return OpenFPGALoader(fpga_part="xc7a50tcsg324", cable=cable)
-            elif variant == 'a100t':
-                return OpenFPGALoader(fpga_part="xc7a100tfgg484", cable=cable)
-            elif variant == 'a200t':
-                return OpenFPGALoader(fpga_part="xc7a200tfbg484", cable=cable)
-            else:
-                raise ValueError("Unknown FPGA Variant for flashing")
-        elif name == 'vivado':
-            # TODO: some board versions may have s25fl128s
-            return VivadoProgrammer(flash_part='s25fl256sxxxxxx0-spi-x1_x2_x4')
+    def create_programmer(self, variant="a100t", cable="digilent_hs2"):
+        if variant == 'a35t':
+            return OpenFPGALoader(fpga_part="xc7a35tcsg325", cable=cable)
+        elif variant == 'a50t':
+            return OpenFPGALoader(fpga_part="xc7a50tcsg325_1v35", cable=cable)
+        elif variant == 'a100t':
+            return OpenFPGALoader(fpga_part="xc7a100tfgg484", cable=cable)
+        elif variant == 'a200t':
+            return OpenFPGALoader(fpga_part="xc7a200tfbg484", cable=cable)
+        else:
+            raise ValueError("Unknown FPGA Variant for flashing", variant)
 
     def do_finalize(self, fragment):
         XilinxPlatform.do_finalize(self, fragment)
@@ -260,21 +306,21 @@ class CRG(Module):
         self.clock_domains.cd_idelay = ClockDomain()
 
         # CFGM Clk ~65MHz.
-        cfgm_clk      = Signal()
-        cfgm_clk_freq = int(65e6)
-        self.specials += Instance("STARTUPE2",
-            i_CLK       = 0,
-            i_GSR       = 0,
-            i_GTS       = 0,
-            i_KEYCLEARB = 1,
-            i_PACK      = 0,
-            i_USRCCLKO  = cfgm_clk,
-            i_USRCCLKTS = 0,
-            i_USRDONEO  = 1,
-            i_USRDONETS = 1,
-            o_CFGMCLK   = cfgm_clk
-        )
-        platform.add_period_constraint(cfgm_clk, 1e9/65e6)
+        # cfgm_clk      = Signal()
+        # cfgm_clk_freq = int(65e6)
+        # self.specials += Instance("STARTUPE2",
+        #     i_CLK       = 0,
+        #     i_GSR       = 0,
+        #     i_GTS       = 0,
+        #     i_KEYCLEARB = 1,
+        #     i_PACK      = 0,
+        #     i_USRCCLKO  = cfgm_clk,
+        #     i_USRCCLKTS = 0,
+        #     i_USRDONEO  = 1,
+        #     i_USRDONETS = 1,
+        #     o_CFGMCLK   = cfgm_clk
+        # )
+        # platform.add_period_constraint(cfgm_clk, 1e9/65e6)
 
         # PLL.
         self.submodules.pll = pll = S7PLL(speedgrade=-2)
@@ -315,9 +361,28 @@ class CRG(Module):
 # BaseSoC -----------------------------------------------------------------------------------------
 
 class BaseSoC(SoCMini):
+    SoCCore.csr_map = {
+        "dna": 0,
+        "identifier_mem": 1,
+        "pcie_phy": 2,
+        "pcie_msi": 3,
+        "pcie_endpoint": 4,
+        "pcie_dma0": 5,
+        "ctrl": 6,
+        "spiflash_core": 7,
+        "spiflash_phy": 8,
+        "flash_adapter": 9,
+        "icap": 10,
+        "xadc": 11,
+    }
+    SoCCore.mem_map = {
+        "csr": 0x0000_0000,
+        "ota": 0x0001_0000,
+        "spiflash": 0x1000_0000
+    }
+
     def __init__(self, sys_clk_freq=int(150e6),
         variant       ="a100t",
-        with_pcie     = True,
         with_frontend = True,
         with_adc      = True,
         with_jtagbone = True,
@@ -329,8 +394,13 @@ class BaseSoC(SoCMini):
         self.submodules.crg = CRG(platform, sys_clk_freq)
 
         # SoCMini ----------------------------------------------------------------------------------
+        commit, dirty = get_commit_hash_string()
+        if dirty:
+            commit = commit[0:8] + "-dirty"
+        else:
+            commit = commit[0:8]
         SoCMini.__init__(self, platform, sys_clk_freq,
-            ident         = "LitePCIe SoC on ThunderScope",
+            ident         = f"LitePCIe SoC on ThunderScope {variant.upper()} ({commit})",
             ident_version = True,
         )
 
@@ -354,18 +424,58 @@ class BaseSoC(SoCMini):
         self.leds.add_pwm(default_width=128, default_period=1024) # Default to 1/8 to reduce brightness.
 
         # PCIe -------------------------------------------------------------------------------------
-        if with_pcie:
-            self.submodules.pcie_phy = S7PCIEPHY(platform, platform.request("pcie_x4"),
-                data_width = 128,
-                bar0_size  = 0x20000
-            )
-            self.add_pcie(phy=self.pcie_phy, ndmas=1, dma_buffering_depth=1024*16, max_pending_requests=4, address_width=64)
+        self.submodules.pcie_phy = S7PCIEPHY(platform, platform.request("pcie_x4"),
+            data_width = 128,
+            bar0_size  = 0x2_0000
+        )
+        self.add_pcie(phy=self.pcie_phy, ndmas=1, dma_buffering_depth=1024*16,
+                      max_pending_requests=4, address_width=64)
 
-            # ICAP (For FPGA reload over PCIe).
-            from litex.soc.cores.icap import ICAP
-            self.submodules.icap = ICAP()
-            self.icap.add_reload()
-            self.icap.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
+
+        # SPI Flash --------------------------------------------------------------------------------
+        #A100T/A200T
+        class S25FL256S(SpiNorFlashModule):
+            manufacturer_id = SpiNorFlashManufacturerIDs.SPANSION
+            device_id = 0x0219
+            name = "s25fl256s"
+
+            total_size  =   33554432   # bytes
+            page_size   =        256   # bytes
+            total_pages =     131072
+
+            supported_opcodes = [
+                Codes.READ_1_1_4_4B,
+                Codes.PP_1_1_4_4B,
+                Codes.SE_4B,
+            ]
+            dummy_bits = 8
+
+        spi_flash_modules = {
+            "a100t": lambda: S25FL256S(Codes.READ_1_1_4_4B, program_cmd=Codes.PP_1_1_4_4B, erase_cmd=Codes.SE_4B),
+            "a200t": lambda: S25FL256S(Codes.READ_1_1_4_4B, program_cmd=Codes.PP_1_1_4_4B, erase_cmd=Codes.SE_4B),
+            "a50t":  lambda: MX25U6435E(Codes.READ_1_1_4, program_cmd=Codes.PP_1_1_4),
+            "a35t":  lambda: MX25U6435E(Codes.READ_1_1_4, program_cmd=Codes.PP_1_1_4)
+        }
+        self.add_spi_flash(mode="4x", module=spi_flash_modules[variant](), clk_freq=65e6,
+                           rate="1:1", with_mmap=True, with_master=True, with_mmap_write="csr")
+
+        # # QSPI Flash Adapter -----------------------------------------------------------------------
+        pcie_translated = wishbone.Interface(bursting=True)
+        pcie_wb = self.bus.masters["pcie_mmap"]
+
+        self.submodules.flash_adapter = WindowRemapper(
+            master = pcie_wb,
+            slave=pcie_translated,
+            src_regions = [SoCRegion(origin=self.mem_map.get("ota", None), size=0x1_0000)],
+            dst_regions = [SoCRegion(origin=self.mem_map.get("spiflash", None), size=0x200_0000)]
+        )
+        self.bus.masters["pcie_mmap"] = pcie_translated
+
+        # ICAP (For FPGA reload over PCIe) ---------------------------------------------------------
+        from litex.soc.cores.icap import ICAP
+        self.submodules.icap = ICAP()
+        self.icap.add_reload()
+        self.icap.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
 
         # Frontend / ADC ---------------------------------------------------------------------------
 
@@ -505,7 +615,8 @@ class BaseSoC(SoCMini):
 
             adc_polarity = {"a100t" : [1, 1, 0, 1, 1, 1, 1, 1],
                             "a200t" : [1, 1, 0, 1, 1, 1, 1, 1],
-                            "a50t"  : [0, 0, 1, 1, 0, 1, 1, 1]}
+                            "a50t"  : [0, 0, 1, 1, 0, 1, 1, 1],
+                            "a35t"  : [0, 0, 1, 1, 0, 1, 1, 1]}
 
             self.submodules.adc = ADC(
                 control_pads = platform.request("adc_control"),
@@ -535,7 +646,7 @@ def main():
     from litex.soc.integration.soc import LiteXSoCArgumentParser
     parser = LiteXSoCArgumentParser(description="LitePCIe SoC on ThunderScope")
     target_group = parser.add_argument_group(title="Target options")
-    target_group.add_argument("--variant",   default="a100t",     help="Board variant (a200t, a100t or a50t).")
+    target_group.add_argument("--variant",   default="a100t",     help="Board variant (a200t, a100t, a50t or a35t).")
     target_group.add_argument("--build",     action="store_true", help="Build bitstream.")
     target_group.add_argument("--load",      action="store_true", help="Load bitstream.")
     target_group.add_argument("--flash",     action="store_true", help="Flash bitstream.")
@@ -547,6 +658,9 @@ def main():
     soc = BaseSoC(variant = args.variant)
 
     builder  = Builder(soc, csr_csv="test/csr.csv")
+    os.makedirs(builder.gateware_dir, exist_ok=True)
+    shutil.copyfile(f"bin/barrierA.bin", f"{builder.gateware_dir}/barrierA.bin")
+    shutil.copyfile(f"bin/barrierB.bin", f"{builder.gateware_dir}/barrierB.bin")
     builder.build(run=args.build)
 
     # Generate LitePCIe Driver.
@@ -555,13 +669,13 @@ def main():
 
     # Load Bistream.
     if args.load:
-        prog = soc.platform.create_programmer(name="openfpgaloader", variant = args.variant, cable = args.cable)
+        prog = soc.platform.create_programmer(variant = args.variant, cable = args.cable)
         prog.load_bitstream(builder.get_bitstream_filename(mode="sram"))
 
     # Flash Bitstream.
     if args.flash:
-        prog = soc.platform.create_programmer(name="openfpgaloader", variant = args.variant, cable = args.cable)
-        prog.flash(0, builder.get_bitstream_filename(mode="flash"))
+        prog = soc.platform.create_programmer(variant = args.variant, cable = args.cable)
+        prog.flash(0, builder.get_bitstream_filename(mode="flash", ext="_full.bin"))
 
 if __name__ == "__main__":
     main()
