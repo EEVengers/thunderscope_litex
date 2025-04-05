@@ -428,6 +428,10 @@ class BaseSoC(SoCMini):
             data_width = 128,
             bar0_size  = 0x2_0000
         )
+        self.pcie_phy.config.update({
+            "Vendor_ID": "20A7",
+            "Device_ID": "0101"
+        })
         self.add_pcie(phy=self.pcie_phy, ndmas=1, dma_buffering_depth=1024*16,
                       max_pending_requests=4, address_width=64)
 
