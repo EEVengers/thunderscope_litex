@@ -1,6 +1,8 @@
-build/
-__pycache__/
-software/
+.venv
+build
+distrib
+__pycache__
+software
 *.vcd
 *.jou
 *.log
