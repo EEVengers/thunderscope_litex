@@ -13,13 +13,13 @@ PROJECT:=thunderscope
 
 # List all build variants
 BETA_VARIANTS:= a50t a100t a200t
-
+PROD_VARIANTS:= dev prod
 
 # Define the set of supported variants to be built as part of a release
-RELEASE_VARIANTS= $(BETA_VARIANTS)
+RELEASE_VARIANTS= $(PROD_VARIANTS)
 
 # Collect all possible variants
-ALL_VARIANTS= $(RELEASE_VARIANTS) a35t
+ALL_VARIANTS= $(RELEASE_VARIANTS) $(BETA_VARIANTS)
 
 # Paths to use for building
 BUILD_PATH:= build
