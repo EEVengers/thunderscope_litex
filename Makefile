@@ -3,6 +3,9 @@
 # Copyright (c) 2025 Nate Meyer <nate.devel@gmail.com>
 # SPDX-License-Identifier: BSD-2-Clause
 
+include version.mk
+export BUILD_VERSION
+
 # Use Python3.  Some systems may need this to be just 'python'
 PY:=python3
 
@@ -41,10 +44,10 @@ $(ALL_VARIANTS) : $(SOURCES)
 	$(PY) $(PROJECT).py --variant=$@ --build --output-dir=$(BUILD_PATH)/$(PROJECT)_$@
 	# Copy to destination folder
 	@mkdir -p $(DIST_PATH)/$@
-	@cp $(BUILD_PATH)/$(PROJECT)_$@/gateware/$(PROJECT)_full.bin $(DIST_PATH)/$@/$(PROJECT)_$@_full.bin
-	@cp $(BUILD_PATH)/$(PROJECT)_$@/gateware/$(PROJECT)_full.mcs $(DIST_PATH)/$@/$(PROJECT)_$@_full.mcs
-	@cp $(BUILD_PATH)/$(PROJECT)_$@/gateware/$(PROJECT)_update.bin $(DIST_PATH)/$@/$(PROJECT)_$@_update.bin
-	@cp $(BUILD_PATH)/$(PROJECT)_$@/gateware/$(PROJECT)_update.bit $(DIST_PATH)/$@/$(PROJECT)_$@_update.bit
+	@cp $(BUILD_PATH)/$(PROJECT)_$@/gateware/$(PROJECT)_full.bin $(DIST_PATH)/$@/$(PROJECT)_full_$@_$(BUILD_VERSION).bin
+	@cp $(BUILD_PATH)/$(PROJECT)_$@/gateware/$(PROJECT)_full.mcs $(DIST_PATH)/$@/$(PROJECT)_full_$@_$(BUILD_VERSION).mcs
+	@cp $(BUILD_PATH)/$(PROJECT)_$@/gateware/$(PROJECT)_update.bin $(DIST_PATH)/$@/$(PROJECT)_update_$@_$(BUILD_VERSION).bin
+	@cp $(BUILD_PATH)/$(PROJECT)_$@/gateware/$(PROJECT)_update.bit $(DIST_PATH)/$@/$(PROJECT)_update_$@_$(BUILD_VERSION).bit
 
 driver:
 	$(PY) $(PROJECT).py --driver --driver-dir=$(BUILD_PATH)/$(PROJECT)/driver

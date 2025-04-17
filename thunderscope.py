@@ -395,13 +395,16 @@ class BaseSoC(SoCMini):
         self.submodules.crg = CRG(platform, sys_clk_freq)
 
         # SoCMini ----------------------------------------------------------------------------------
-        commit, dirty = get_commit_hash_string()
-        if dirty:
-            commit = commit[0:8] + "-dirty"
+        if os.getenv("BUILD_VERSION") is not None:
+            version_string = os.getenv("BUILD_VERSION")
         else:
-            commit = commit[0:8]
+            commit, dirty = get_commit_hash_string()
+            version_string = commit[0:8]
+            if dirty:
+                version_string += "-dirty"
+            
         SoCMini.__init__(self, platform, sys_clk_freq,
-            ident         = f"LitePCIe SoC on ThunderScope {variant.upper()} ({commit})",
+            ident         = f"LitePCIe SoC on ThunderScope {variant.upper()} ({version_string})",
             ident_version = True,
         )
 
