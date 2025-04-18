@@ -67,7 +67,7 @@ a7_484_io = [
 
     # Leds.
     # -----
-    ("user_led_n", 0, Pins("T21"), IOStandard("LVCMOS33")), # Red.
+    ("user_led_n", 0, Pins("T21"), IOStandard("LVCMOS33")), # Green.
 
     # SPI Flash.
     # ----------
@@ -155,7 +155,7 @@ a7_325_io = [
 
     # Leds.
     # -----
-    ("user_led_n", 0, Pins("U17"), IOStandard("SSTL135")), # Red.
+    ("user_led_n", 0, Pins("U17"), IOStandard("SSTL135")), # Green.
 
     # SPI Flash.
     # ----------
@@ -236,16 +236,140 @@ a7_325_io = [
     ("sync", 0, Pins("P6"), IOStandard("LVCMOS33"))
 ]
 
+# Thunderscope Production
+a7_thunderscope_rev5 = [
+    # Main system clock. 
+    ("clk25", 0,  Pins("T14"), IOStandard("LVCMOS33")),
+
+    # HW IDs
+    # -------
+    ("hw_id", 0, 
+        Subsignal("hw_rev", Pins("T18 R18 P18")),
+        Subsignal("hw_variant", Pins("K18")),
+        IOStandard("LVCMOS33")),
+
+    # Leds.
+    # -----
+    ("user_led_n", 0,
+        Subsignal("red",  Pins("T15")),
+        Subsignal("green", Pins("R13")),
+        Subsignal("blue", Pins("U14")),
+        IOStandard("LVCMOS33")),
+
+    # SPI Flash.
+    # ----------
+    ("spiflash4x", 0,
+        Subsignal("cs_n", Pins("L15")),
+        # Subsignal("clk",  Pins("E8")),
+        Subsignal("dq",   Pins("K16 L17 J15 J16")),
+        IOStandard("LVCMOS33")
+    ),
+
+    # PCIe / Gen2 X4.
+    # ---------------
+    ("pcie_x4", 0,
+        Subsignal("rst_n", Pins("U9"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")),
+        Subsignal("clk_p", Pins("B6")),
+        Subsignal("clk_n", Pins("B5")),
+        Subsignal("rx_p",  Pins("E4 A4 C4 G4")),
+        Subsignal("rx_n",  Pins("E3 A3 C3 G3")),
+        Subsignal("tx_p",  Pins("H2 F2 D2 B2")),
+        Subsignal("tx_n",  Pins("H1 F1 D1 B1")),
+    ),
+
+    # Frontend.
+    # ---------
+
+    # Probe Compensation.
+    ("fe_probe_compensation", 0, Pins("R15"), IOStandard("LVCMOS33")),
+
+    # Control / Status.
+    ("fe_control", 0,
+        Subsignal("fe_en",       Pins("U15"), IOStandard("LVCMOS33")),
+        Subsignal("fe_pg",       Pins("V16"), IOStandard("LVCMOS33")),
+        Subsignal("coupling",    Pins("N16 M15 N18 V12"), IOStandard("LVCMOS33")),
+        Subsignal("attenuation", Pins("N17 M16 L18 V11"), IOStandard("LVCMOS33")),
+        Subsignal("term",        Pins("M14 K15 K17 V13"), IOStandard("LVCMOS33"))
+    ),
+
+    # Amplifier SPI
+    ("main_spi", 0,
+        Subsignal("clk",  Pins("P15")),
+        Subsignal("cs_n", Pins("P16 M17 R17 U11")),
+        Subsignal("mosi", Pins("N14")),
+        IOStandard("LVCMOS33"),
+    ),
+
+    # I2C busses.
+    # --------
+    ("trim_i2c", 0,
+        Subsignal("sda", Pins("V14")),
+        Subsignal("scl", Pins("T13")),
+        IOStandard("LVCMOS33"),
+    ),
+    ("pll_i2c", 0,
+        Subsignal("sda", Pins("T12")),
+        Subsignal("scl", Pins("U12")),
+        IOStandard("LVCMOS33"),
+    ),
+
+    # ADC / HMCAD1511.
+    # ----------------
+
+    # Control / Status / SPI.
+    ("adc_control", 0,
+        Subsignal("acq_en",      Pins("T17"), IOStandard("LVCMOS33")),
+        Subsignal("acq_pg",      Pins("V17"), IOStandard("LVCMOS33")),
+        Subsignal("osc_oe",      Pins("P14")), # PLL RSTn.
+        IOStandard("LVCMOS33"),
+    ),
+
+    ("adc_spi", 0,
+        Subsignal("clk",  Pins("U16")),
+        Subsignal("cs_n", Pins("U17")),
+        Subsignal("mosi", Pins("R16")),
+        IOStandard("LVCMOS33"),
+    ),
+
+    # Datapath.
+    ("adc_data", 0,
+        Subsignal("lclk_p", Pins("E13")), # Bitclock.
+        Subsignal("lclk_n", Pins("D14")),
+        Subsignal("fclk_p", Pins("B12")), # Frameclock. (Inverted)
+        Subsignal("fclk_n", Pins("A12")),
+        # Lane:                D1A D1B D2A D2B D3A D3B D4A D4B
+        # Lanes polarity:                   X                      # (X=Inverted).
+        Subsignal("d_p", Pins(" B9 B10 D11 C11 A13 B14 D13 C14")), # Data.
+        Subsignal("d_n", Pins(" A9 A10 C12 B11 A14 A15 C13 B15")),
+        IOStandard("LVDS_25"),
+        Misc("DIFF_TERM=TRUE"),
+    ),
+
+    # SYNC
+    # ----------------
+    ("sync", 0,
+        Subsignal("in_p", Pins("D8")), 
+        Subsignal("in_n", Pins("C8")), 
+        Subsignal("out_p", Pins("D9")), 
+        Subsignal("out_n", Pins("C9")),
+        Subsignal("re_n", Pins("U10"), IOStandard("LVCMOS33")),
+        Subsignal("de", Pins("V9"), IOStandard("LVCMOS33")),
+        IOStandard("LVDS_25"),
+        Misc("DIFF_TERM=TRUE"))
+]
+
 # Platform -----------------------------------------------------------------------------------------
 
 class Platform(Xilinx7SeriesPlatform):
     device_list = {
-        "a100t" : {"fpga": "xc7a100tfgg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a100t.bit", "multiboot_addr": 0x100_0000, "multiboot_end": 0x1B00000, "flash_size": 32, "cfgbvs": "VCCO", "config": "3.3"},
-        "a200t" : {"fpga": "xc7a200tfbg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a200t.bit", "multiboot_addr": 0x100_0000, "multiboot_end": 0x1B00000, "flash_size": 32, "cfgbvs": "VCCO", "config": "3.3"},
-        "a50t"  : {"fpga": "xc7a50tcsg325-2",  "io": a7_325_io, "flash": "bscan_spi_xc7a50t.bit", "multiboot_addr": 0x40_0000, "multiboot_end": 0x680000, "flash_size": 8, "cfgbvs": "GND", "config": "1.8"},
-        "a35t"  : {"fpga": "xc7a35tcsg325-2",  "io": a7_325_io, "flash": "bscan_spi_xc7a35t.bit", "multiboot_addr": 0x40_0000, "multiboot_end": 0x680000, "flash_size": 8, "cfgbvs": "GND", "config": "1.8"},
+        "a100t" : {"fpga": "xc7a100tfgg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a100t.bit", "multiboot_addr": 0x100_0000, "multiboot_end": 0x1B0_0000, "flash_size": 32, "cfgbvs": "VCCO", "config": "3.3"},
+        "a200t" : {"fpga": "xc7a200tfbg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a200t.bit", "multiboot_addr": 0x100_0000, "multiboot_end": 0x1B0_0000, "flash_size": 32, "cfgbvs": "VCCO", "config": "3.3"},
+        "a50t"  : {"fpga": "xc7a50tcsg325-2",  "io": a7_325_io, "flash": "bscan_spi_xc7a50t.bit", "multiboot_addr": 0x40_0000, "multiboot_end": 0x68_0000, "flash_size": 8, "cfgbvs": "GND", "config": "1.8"},
+        "a35t"  : {"fpga": "xc7a35tcsg325-2",  "io": a7_325_io, "flash": "bscan_spi_xc7a35t.bit", "multiboot_addr": 0x40_0000, "multiboot_end": 0x68_0000, "flash_size": 8, "cfgbvs": "GND", "config": "1.8"},
+        "dev"   : {"fpga": "xc7a50tcsg325-2",  "io": a7_thunderscope_rev5, "flash": "bscan_spi_xc7a60t.bit", "multiboot_addr": 0x40_0000, "multiboot_end": 0x68_0000, "flash_size": 8, "cfgbvs": "VCCO", "config": "3.3"},
+        "prod"  : {"fpga": "xc7a35tcsg325-2",  "io": a7_thunderscope_rev5, "flash": "bscan_spi_xc7a60t.bit", "multiboot_addr": 0x40_0000, "multiboot_end": 0x68_0000, "flash_size": 8, "cfgbvs": "VCCO", "config": "3.3"},
     }
-    def __init__(self, toolchain="vivado", variant="a100t"):
+    def __init__(self, toolchain="vivado", variant="dev"):
 
         Xilinx7SeriesPlatform.__init__(self, 
                                 self.device_list[variant]["fpga"],
@@ -280,9 +404,11 @@ class Platform(Xilinx7SeriesPlatform):
             f"write_cfgmem -force -format mcs -size {self.device_list[variant]['flash_size']} -interface SPIx4 -loadbit \"up 0x00000000 {{build_name}}_gold.bit up 0x{self.device_list[variant]['multiboot_addr']:08X} {{build_name}}_update.bit\" {load_barrier_imgs} {{build_name}}_full.mcs",
         ]
 
-    def create_programmer(self, variant="a100t", cable="digilent_hs2"):
-        if variant == 'a35t':
+    def create_programmer(self, variant="dev", cable="digilent_hs2"):
+        if variant == 'prod':
             return OpenFPGALoader(fpga_part="xc7a35tcsg325", cable=cable)
+        elif variant == 'dev':
+            return OpenFPGALoader(fpga_part="xc7a50tcsg325", cable=cable)
         elif variant == 'a50t':
             return OpenFPGALoader(fpga_part="xc7a50tcsg325_1v35", cable=cable)
         elif variant == 'a100t':
@@ -374,6 +500,7 @@ class BaseSoC(SoCMini):
         "flash_adapter": 9,
         "icap": 10,
         "xadc": 11,
+        "device": 12,
     }
     SoCCore.mem_map = {
         "csr": 0x0000_0000,
@@ -382,10 +509,10 @@ class BaseSoC(SoCMini):
     }
 
     def __init__(self, sys_clk_freq=int(150e6),
-        variant       ="a100t",
+        variant       ="dev",
         with_frontend = True,
         with_adc      = True,
-        with_jtagbone = True,
+        with_jtagbone = False,
         with_analyzer = False,
         **kwargs
     ):
@@ -408,6 +535,48 @@ class BaseSoC(SoCMini):
             ident_version = True,
         )
 
+
+        # Device Status------------------------------------------------------------------------------------
+        
+        class DeviceStatus(Module, AutoCSR):
+            def __init__(self, led_pads, hw_id_pads, sys_clk_freq):
+
+                self.leds = leds = LedChaser(
+                    pads         = led_pads,
+                    sys_clk_freq = sys_clk_freq,
+                    polarity     = 1,
+                )
+                # self.leds.add_pwm(default_width=128, default_period=1024) # Default to 1/8 to reduce brightness.
+
+                # HW ID Pins
+                self._hw_id = hw_id = CSRStatus(fields=[
+                                    CSRField("hw_rev", offset=0, size=3, description="HW Revision."),
+                                    CSRField("hw_variant", offset=8, size=1, description="HW Bus Variant.", values=[
+                                        ("``0b0``", "PCIe"),
+                                        ("``0b1``", "USB"),
+                                    ]),
+                                    CSRField("hw_valid", offset=9, size=1, description="HW ID is valid for this board.")
+                                ])
+
+                if hw_id_pads is not None:
+                    self.sync += [
+                        hw_id.fields.hw_rev.eq(hw_id_pads.hw_rev),
+                        hw_id.fields.hw_variant.eq(hw_id_pads.hw_variant),
+                        hw_id.fields.hw_valid.eq(1)
+                    ]
+                else:
+                    self.sync += [
+                        hw_id.fields.hw_rev.eq(0),
+                        hw_id.fields.hw_variant.eq(0),
+                        hw_id.fields.hw_valid.eq(0)
+                    ]
+
+        self.submodules.dev_status = DeviceStatus(
+                led_pads     = platform.request("user_led_n"),
+                hw_id_pads   = platform.request("hw_id", loose=True),
+                sys_clk_freq     = sys_clk_freq,
+            )
+
         # JTAGBone ---------------------------------------------------------------------------------
         if with_jtagbone:
             self.add_jtagbone()
@@ -418,14 +587,6 @@ class BaseSoC(SoCMini):
         # DNA --------------------------------------------------------------------------------------
         self.submodules.dna = DNA()
         self.dna.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
-
-        # Leds -------------------------------------------------------------------------------------
-        self.submodules.leds = LedChaser(
-            pads         = platform.request("user_led_n"),
-            sys_clk_freq = sys_clk_freq,
-            polarity     = 1,
-        )
-        self.leds.add_pwm(default_width=128, default_period=1024) # Default to 1/8 to reduce brightness.
 
         # PCIe -------------------------------------------------------------------------------------
         self.submodules.pcie_phy = S7PCIEPHY(platform, platform.request("pcie_x4"),
@@ -462,7 +623,9 @@ class BaseSoC(SoCMini):
             "a100t": lambda: S25FL256S(Codes.READ_1_1_4_4B, program_cmd=Codes.PP_1_1_4_4B, erase_cmd=Codes.SE_4B),
             "a200t": lambda: S25FL256S(Codes.READ_1_1_4_4B, program_cmd=Codes.PP_1_1_4_4B, erase_cmd=Codes.SE_4B),
             "a50t":  lambda: MX25U6435E(Codes.READ_1_1_4, program_cmd=Codes.PP_1_1_4),
-            "a35t":  lambda: MX25U6435E(Codes.READ_1_1_4, program_cmd=Codes.PP_1_1_4)
+            "a35t":  lambda: MX25U6435E(Codes.READ_1_1_4, program_cmd=Codes.PP_1_1_4),
+            "dev":   lambda: MX25U6435E(Codes.READ_1_1_4, program_cmd=Codes.PP_1_1_4),
+            "prod":  lambda: MX25U6435E(Codes.READ_1_1_4, program_cmd=Codes.PP_1_1_4)
         }
         self.add_spi_flash(mode="4x", module=spi_flash_modules[variant](), clk_freq=65e6,
                            rate="1:1", with_mmap=True, with_master=True, with_mmap_write="csr")
@@ -492,7 +655,15 @@ class BaseSoC(SoCMini):
         # - PLL      (ZL30260 @ 0x74).
         # - Digi-pot (MCP4432 @ 0x2C).
         # # #
-        self.submodules.i2c = LiteI2C(sys_clk_freq=sys_clk_freq, pads=platform.request("i2c"))
+        i2c_pads = platform.request("i2c", loose=True)
+
+        if i2c_pads is not None:
+            # Rev4 design has a single I2C bus
+            self.submodules.i2c = LiteI2C(sys_clk_freq=sys_clk_freq, pads=i2c_pads)
+        else:
+            # Rev5 design splits the Trim and PLL I2C busses
+            self.submodules.i2c = LiteI2C(sys_clk_freq=sys_clk_freq, pads=platform.request("trim_i2c"))
+            self.submodules.pll_i2c = LiteI2C(sys_clk_freq=sys_clk_freq, pads=platform.request("pll_i2c"))
 
         # Probe Compensation.
         self.submodules.probe_compensation = PWM(
@@ -538,6 +709,12 @@ class BaseSoC(SoCMini):
                             ("``0b1``", "50Ohm Termination (one bit per channel)."),
                         ]),
                     ])
+                    self._status = CSRStatus(fields=[
+                        CSRField("fe_pg", offset=0, size=1, description="Frontend Power Good.", values=[
+                            ("``0b0``", "LDO No Power."),
+                            ("``0b1``", "LDO Power."),
+                        ]),
+                    ])
                     # # #
 
                     # Power.
@@ -552,6 +729,9 @@ class BaseSoC(SoCMini):
                     # Termination.
                     self.comb += control_pads.term.eq(self._control.fields.termination)
 
+                    # Frontend Power Good.
+                    if hasattr(control_pads,'fe_pg'):
+                        self.sync += self._status.fields.fe_pg.eq(control_pads.fe_pg)
 
             self.submodules.frontend = Frontend(
                 control_pads     = platform.request("fe_control"),
@@ -562,7 +742,7 @@ class BaseSoC(SoCMini):
         if with_adc:
 
             class ADC(Module, AutoCSR):
-                def __init__(self, control_pads, data_pads, sys_clk_freq,
+                def __init__(self, control_pads, spi_pads, data_pads, sys_clk_freq,
                     data_width   = 128, data_polarity = [1, 1, 0, 1, 1, 1, 1, 1]
                 ):
 
@@ -586,6 +766,12 @@ class BaseSoC(SoCMini):
                         ]),
                     ])
                    
+                    self._status = CSRStatus(fields=[
+                        CSRField("acq_pg", offset=0, size=1, description="ADC Power Good.", values=[
+                            ("``0b0``", "ADC No Power."),
+                            ("``0b1``", "ADC Power."),
+                        ]),
+                    ])
 
                     # Data Source.
                     self.source = stream.Endpoint([("data", data_width)])
@@ -594,11 +780,29 @@ class BaseSoC(SoCMini):
 
                     # Control-Path -----------------------------------------------------------------
 
+                    # SPI
+                    
+                    if spi_pads is not None:
+                        # Rev5 design has a deidcated SPI bus for the ADC
+                        adc_spi_clk_freq = 1e6
+                        if not hasattr(spi_pads, "miso"):
+                            spi_pads.miso = Signal()
+                        self.submodules.spi = SPIMaster(
+                                                    pads         = spi_pads,
+                                                    data_width   = 24,
+                                                    sys_clk_freq = sys_clk_freq,
+                                                    spi_clk_freq = adc_spi_clk_freq
+                                                )
+
                     # Control.
                     self.comb += [
                         control_pads.acq_en.eq(self._control.fields.acq_en),
                         control_pads.osc_oe.eq(self._control.fields.osc_en),
                     ]
+
+                    # Status.
+                    if hasattr(control_pads,'acq_pg'):
+                        self.sync += self._status.fields.acq_pg.eq(control_pads.acq_pg)
 
                     # Data-Path --------------------------------------------------------------------
 
@@ -624,10 +828,14 @@ class BaseSoC(SoCMini):
             adc_polarity = {"a100t" : [1, 1, 0, 1, 1, 1, 1, 1],
                             "a200t" : [1, 1, 0, 1, 1, 1, 1, 1],
                             "a50t"  : [0, 0, 1, 1, 0, 1, 1, 1],
-                            "a35t"  : [0, 0, 1, 1, 0, 1, 1, 1]}
+                            "a35t"  : [0, 0, 1, 1, 0, 1, 1, 1],
+                            "dev"   : [0, 0, 0, 1, 0, 0, 0, 0],
+                            "prod"  : [0, 0, 0, 1, 0, 0, 0, 0],
+                            }
 
             self.submodules.adc = ADC(
                 control_pads = platform.request("adc_control"),
+                spi_pads     = platform.request("adc_spi", loose=True),
                 data_pads    = platform.request("adc_data"),
                 sys_clk_freq = sys_clk_freq,
                 data_polarity=adc_polarity[variant]
@@ -654,7 +862,7 @@ def main():
     from litex.build.parser import LiteXArgumentParser
     parser = LiteXArgumentParser(platform=Platform, description="LitePCIe SoC on ThunderScope")
     target_group = parser.add_argument_group(title="Target options")
-    target_group.add_argument("--variant",   default="a100t",     help="Board variant (a200t, a100t, a50t or a35t).")
+    target_group.add_argument("--variant",   default="dev",     help="Board variant [prod, dev, a200t, a100t, a50t].")
     target_group.add_argument("--flash",     action="store_true", help="Flash bitstream.")
     target_group.add_argument("--driver",    action="store_true", help="Generate PCIe driver.")
     target_group.add_argument("--cable",     default="digilent_hs2", help="JTAG cable name.")
