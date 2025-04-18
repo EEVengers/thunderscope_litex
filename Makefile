@@ -53,8 +53,9 @@ driver:
 	$(PY) $(PROJECT).py --driver --driver-dir=$(BUILD_PATH)/$(PROJECT)/driver
 
 docs:
-	$(PY) $(PROJECT).py --doc
-	@sphinx-build $(BUILD_PATH)/$(PROJECT)/doc doc
+	$(PY) $(PROJECT).py --variant=prod --doc
+	@sphinx-build $(BUILD_PATH)/$(PROJECT)/doc $(BUILD_PATH)/docs
+	zip -ur $(DIST_PATH)/$(PROJECT)_docs.zip $(BUILD_PATH)/docs/*
 
 distclean:
 	@rm -rf $(BUILD_PATH)/*
