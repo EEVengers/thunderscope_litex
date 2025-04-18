@@ -67,7 +67,7 @@ a7_484_io = [
 
     # Leds.
     # -----
-    ("user_led_n", 0, Pins("T21"), IOStandard("LVCMOS33")), # Red.
+    ("user_led_n", 0, Pins("T21"), IOStandard("LVCMOS33")), # Green.
 
     # SPI Flash.
     # ----------
@@ -155,7 +155,7 @@ a7_325_io = [
 
     # Leds.
     # -----
-    ("user_led_n", 0, Pins("U17"), IOStandard("SSTL135")), # Red.
+    ("user_led_n", 0, Pins("U17"), IOStandard("SSTL135")), # Green.
 
     # SPI Flash.
     # ----------
@@ -245,7 +245,7 @@ a7_thunderscope_rev5 = [
     # -------
     ("hw_id", 0, 
         Subsignal("hw_rev", Pins("T18 R18 P18")),
-        Subsignal("variant", Pins("K18")),
+        Subsignal("hw_variant", Pins("K18")),
         IOStandard("LVCMOS33")),
 
     # Leds.
@@ -500,6 +500,7 @@ class BaseSoC(SoCMini):
         "flash_adapter": 9,
         "icap": 10,
         "xadc": 11,
+        "device": 12,
     }
     SoCCore.mem_map = {
         "csr": 0x0000_0000,
@@ -534,6 +535,48 @@ class BaseSoC(SoCMini):
             ident_version = True,
         )
 
+
+        # Device Status------------------------------------------------------------------------------------
+        
+        class DeviceStatus(Module, AutoCSR):
+            def __init__(self, led_pads, hw_id_pads, sys_clk_freq):
+
+                self.leds = leds = LedChaser(
+                    pads         = led_pads,
+                    sys_clk_freq = sys_clk_freq,
+                    polarity     = 1,
+                )
+                # self.leds.add_pwm(default_width=128, default_period=1024) # Default to 1/8 to reduce brightness.
+
+                # HW ID Pins
+                self._hw_id = hw_id = CSRStatus(fields=[
+                                    CSRField("hw_rev", offset=0, size=3, description="HW Revision."),
+                                    CSRField("hw_variant", offset=8, size=1, description="HW Bus Variant.", values=[
+                                        ("``0b0``", "PCIe"),
+                                        ("``0b1``", "USB"),
+                                    ]),
+                                    CSRField("hw_valid", offset=9, size=1, description="HW ID is valid for this board.")
+                                ])
+
+                if hw_id_pads is not None:
+                    self.sync += [
+                        hw_id.fields.hw_rev.eq(hw_id_pads.hw_rev),
+                        hw_id.fields.hw_variant.eq(hw_id_pads.hw_variant),
+                        hw_id.fields.hw_valid.eq(1)
+                    ]
+                else:
+                    self.sync += [
+                        hw_id.fields.hw_rev.eq(0),
+                        hw_id.fields.hw_variant.eq(0),
+                        hw_id.fields.hw_valid.eq(0)
+                    ]
+
+        self.submodules.dev_status = DeviceStatus(
+                led_pads     = platform.request("user_led_n"),
+                hw_id_pads   = platform.request("hw_id", loose=True),
+                sys_clk_freq     = sys_clk_freq,
+            )
+
         # JTAGBone ---------------------------------------------------------------------------------
         if with_jtagbone:
             self.add_jtagbone()
@@ -544,14 +587,6 @@ class BaseSoC(SoCMini):
         # DNA --------------------------------------------------------------------------------------
         self.submodules.dna = DNA()
         self.dna.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
-
-        # Leds -------------------------------------------------------------------------------------
-        self.submodules.leds = LedChaser(
-            pads         = platform.request("user_led_n"),
-            sys_clk_freq = sys_clk_freq,
-            polarity     = 1,
-        )
-        self.leds.add_pwm(default_width=128, default_period=1024) # Default to 1/8 to reduce brightness.
 
         # PCIe -------------------------------------------------------------------------------------
         self.submodules.pcie_phy = S7PCIEPHY(platform, platform.request("pcie_x4"),
@@ -744,6 +779,20 @@ class BaseSoC(SoCMini):
                     # # #
 
                     # Control-Path -----------------------------------------------------------------
+
+                    # SPI
+                    
+                    if spi_pads is not None:
+                        # Rev5 design has a deidcated SPI bus for the ADC
+                        adc_spi_clk_freq = 1e6
+                        if not hasattr(spi_pads, "miso"):
+                            spi_pads.miso = Signal()
+                        self.submodules.spi = SPIMaster(
+                                                    pads         = spi_pads,
+                                                    data_width   = 24,
+                                                    sys_clk_freq = sys_clk_freq,
+                                                    spi_clk_freq = adc_spi_clk_freq
+                                                )
 
                     # Control.
                     self.comb += [
