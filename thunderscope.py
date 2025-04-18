@@ -15,7 +15,7 @@ from migen import *
 from litex.gen import *
 
 from litex.build.generic_platform import *
-from litex.build.xilinx import XilinxPlatform, VivadoProgrammer
+from litex.build.xilinx import Xilinx7SeriesPlatform
 from litex.build.openfpgaloader import OpenFPGALoader
 
 from litex.soc.interconnect.csr import *
@@ -238,7 +238,7 @@ a7_325_io = [
 
 # Platform -----------------------------------------------------------------------------------------
 
-class Platform(XilinxPlatform):
+class Platform(Xilinx7SeriesPlatform):
     device_list = {
         "a100t" : {"fpga": "xc7a100tfgg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a100t.bit", "multiboot_addr": 0x100_0000, "multiboot_end": 0x1B00000, "flash_size": 32, "cfgbvs": "VCCO", "config": "3.3"},
         "a200t" : {"fpga": "xc7a200tfbg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a200t.bit", "multiboot_addr": 0x100_0000, "multiboot_end": 0x1B00000, "flash_size": 32, "cfgbvs": "VCCO", "config": "3.3"},
@@ -247,7 +247,7 @@ class Platform(XilinxPlatform):
     }
     def __init__(self, toolchain="vivado", variant="a100t"):
 
-        XilinxPlatform.__init__(self, 
+        Xilinx7SeriesPlatform.__init__(self, 
                                 self.device_list[variant]["fpga"],
                                 self.device_list[variant]["io"],
                                 toolchain=toolchain)
@@ -293,7 +293,7 @@ class Platform(XilinxPlatform):
             raise ValueError("Unknown FPGA Variant for flashing", variant)
 
     def do_finalize(self, fragment):
-        XilinxPlatform.do_finalize(self, fragment)
+        Xilinx7SeriesPlatform.do_finalize(self, fragment)
         self.add_period_constraint(self.lookup_request("adc_data:lclk_p", loose=True), 2e9/1000e6)
 
 # CRG ----------------------------------------------------------------------------------------------
@@ -387,6 +387,7 @@ class BaseSoC(SoCMini):
         with_adc      = True,
         with_jtagbone = True,
         with_analyzer = False,
+        **kwargs
     ):
         platform = Platform(variant=variant)
 
@@ -394,13 +395,16 @@ class BaseSoC(SoCMini):
         self.submodules.crg = CRG(platform, sys_clk_freq)
 
         # SoCMini ----------------------------------------------------------------------------------
-        commit, dirty = get_commit_hash_string()
-        if dirty:
-            commit = commit[0:8] + "-dirty"
+        if os.getenv("BUILD_VERSION") is not None:
+            version_string = os.getenv("BUILD_VERSION")
         else:
-            commit = commit[0:8]
+            commit, dirty = get_commit_hash_string()
+            version_string = commit[0:8]
+            if dirty:
+                version_string += "-dirty"
+            
         SoCMini.__init__(self, platform, sys_clk_freq,
-            ident         = f"LitePCIe SoC on ThunderScope {variant.upper()} ({commit})",
+            ident         = f"LitePCIe SoC on ThunderScope {variant.upper()} ({version_string})",
             ident_version = True,
         )
 
@@ -428,6 +432,10 @@ class BaseSoC(SoCMini):
             data_width = 128,
             bar0_size  = 0x2_0000
         )
+        self.pcie_phy.config.update({
+            "Vendor_ID": "20A7",
+            "Device_ID": "0101"
+        })
         self.add_pcie(phy=self.pcie_phy, ndmas=1, dma_buffering_depth=1024*16,
                       max_pending_requests=4, address_width=64)
 
@@ -643,21 +651,22 @@ class BaseSoC(SoCMini):
 # Build --------------------------------------------------------------------------------------------
 
 def main():
-    from litex.soc.integration.soc import LiteXSoCArgumentParser
-    parser = LiteXSoCArgumentParser(description="LitePCIe SoC on ThunderScope")
+    from litex.build.parser import LiteXArgumentParser
+    parser = LiteXArgumentParser(platform=Platform, description="LitePCIe SoC on ThunderScope")
     target_group = parser.add_argument_group(title="Target options")
     target_group.add_argument("--variant",   default="a100t",     help="Board variant (a200t, a100t, a50t or a35t).")
-    target_group.add_argument("--build",     action="store_true", help="Build bitstream.")
-    target_group.add_argument("--load",      action="store_true", help="Load bitstream.")
     target_group.add_argument("--flash",     action="store_true", help="Flash bitstream.")
     target_group.add_argument("--driver",    action="store_true", help="Generate PCIe driver.")
-    target_group.add_argument("--cable",    default="digilent_hs2", help="JTAG cable name.")
+    target_group.add_argument("--cable",     default="digilent_hs2", help="JTAG cable name.")
+    target_group.add_argument("--driver-dir", default="software", help="Directory to store driver")
+
+    
     args = parser.parse_args()
 
     # Build SoC.
-    soc = BaseSoC(variant = args.variant)
+    soc = BaseSoC(variant = args.variant,  **parser.soc_argdict)
 
-    builder  = Builder(soc, csr_csv="test/csr.csv")
+    builder  = Builder(soc,  **parser.builder_argdict)
     os.makedirs(builder.gateware_dir, exist_ok=True)
     shutil.copyfile(f"bin/barrierA.bin", f"{builder.gateware_dir}/barrierA.bin")
     shutil.copyfile(f"bin/barrierB.bin", f"{builder.gateware_dir}/barrierB.bin")
@@ -665,7 +674,7 @@ def main():
 
     # Generate LitePCIe Driver.
     if args.driver:
-        generate_litepcie_software(soc, "software")
+        generate_litepcie_software(soc, args.driver_dir)
 
     # Load Bistream.
     if args.load:
