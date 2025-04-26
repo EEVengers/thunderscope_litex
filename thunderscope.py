@@ -45,7 +45,7 @@ from litepcie.software import generate_litepcie_software
 from litescope import LiteScopeAnalyzer
 
 from peripherals.windowRemapper import WindowRemapper
-from peripherals.had1511_adc import HAD1511ADC
+from peripherals.hmcad15xx_adc import HMCAD15XXADC
 from peripherals.trigger import Trigger
 
 
@@ -743,7 +743,7 @@ class BaseSoC(SoCMini):
 
             class ADC(Module, AutoCSR):
                 def __init__(self, control_pads, spi_pads, data_pads, sys_clk_freq,
-                    data_width   = 128, data_polarity = [1, 1, 0, 1, 1, 1, 1, 1]
+                    data_width = 128, frame_polarity = 1, data_polarity = [1, 1, 0, 1, 1, 1, 1, 1]
                 ):
 
                     # Control/Status.
@@ -809,19 +809,17 @@ class BaseSoC(SoCMini):
                     # Trigger.
                     self.submodules.trigger = Trigger()
 
-                    # HAD1511.
-                    self.submodules.had1511 = HAD1511ADC(data_pads, sys_clk_freq, lanes_polarity=data_polarity)
+                    # HAD1520.
+                    self.submodules.had1520 = HMCAD15XXADC(data_pads, sys_clk_freq, frame_polarity, lanes_polarity=data_polarity)
 
-                    # Gate/Data-Width Converter.
-                    self.submodules.gate = stream.Gate([("data", 64)], sink_ready_when_disabled=True)
-                    self.submodules.conv = stream.Converter(64, data_width)
+                    # Gate.
+                    self.submodules.gate = stream.Gate([("data", 128)], sink_ready_when_disabled=True)
                     self.comb += self.gate.enable.eq(self.trigger.enable)
 
                     # Pipeline.
                     self.submodules += stream.Pipeline(
-                        self.had1511,
+                        self.had1520,
                         self.gate,
-                        self.conv,
                         self.source
                     )
 
@@ -832,12 +830,20 @@ class BaseSoC(SoCMini):
                             "dev"   : [0, 0, 0, 1, 0, 0, 0, 0],
                             "prod"  : [0, 0, 0, 1, 0, 0, 0, 0],
                             }
+            frame_polarity = {"a100t" : 0,
+                              "a200t" : 0,
+                              "a50t"  : 0,
+                              "a35t"  : 0,
+                              "dev"   : 1,
+                              "prod"  : 1,
+                              }
 
             self.submodules.adc = ADC(
                 control_pads = platform.request("adc_control"),
                 spi_pads     = platform.request("adc_spi", loose=True),
                 data_pads    = platform.request("adc_data"),
                 sys_clk_freq = sys_clk_freq,
+                frame_polarity=frame_polarity[variant],
                 data_polarity=adc_polarity[variant]
             )
 
