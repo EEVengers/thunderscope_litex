@@ -19,6 +19,7 @@ from litex.soc.interconnect import stream
 
 from peripherals.spi import *
 from peripherals.downsampling import DownSampling
+from peripherals.byteShuffler import ByteShuffler
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #                               D E S C R I P T I O N                                              #
@@ -55,25 +56,6 @@ HAD1511_ADC_GAIN_9DB = 9
 # Layouts ------------------------------------------------------------------------------------------
 
 had1511_phy_layout = ["fclk_p", "fclk_n", "lclk_p", "lclk_n", "d_p", "d_n"]
-
-# Shuffler -----------------------------------------------------------------------------------------
-
-class ADCByteShuffle(Module):
-    def __init__(self, num_shuffle, byte_swap = []):
-        self.sink   = sink   = stream.Endpoint([("data", len(byte_swap[0])*8)])
-        self.source = source = stream.Endpoint([("data", len(byte_swap[0])*8)])
-
-        self.shuffle = Signal(num_shuffle)
-
-        self.comb += sink.connect(source)
-
-        for i in range(len(byte_swap[0])):
-            cases = {}            
-            for idx, swap in enumerate(byte_swap):
-                cases[idx] = self.source.data[i*8:(i+1)*8].eq(self.sink.data[swap[i]*8:(swap[i]+1)*8])
-
-            self.comb += Case(self.shuffle, cases)
-
 
 # HAD1511 ADC --------------------------------------------------------------------------------------
 
@@ -289,7 +271,7 @@ class HAD1511ADC(LiteXModule):
         #  and [1 1 1 1 2 2 2 2] for 2-channel operation.  Shuffle the data so the output data
         #  stream is [1 2 3 4 1 2 3 4] and [1 2 1 2 1 2 1 2] respectively.
         
-        self.adc_shuffler = ADCByteShuffle(3, byte_swap=[[0, 1, 2, 3, 4, 5, 6, 7],
+        self.adc_shuffler = ByteShuffler(3, byte_swap=[[0, 1, 2, 3, 4, 5, 6, 7],
                                                          [0, 4, 1, 5, 2, 6, 3, 7],
                                                          [0, 2, 4, 6, 1, 3, 5, 7]])
         self.comb += self.adc_shuffler.shuffle.eq(self._data_channels.fields.shuffle)
