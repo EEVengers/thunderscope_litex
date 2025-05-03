@@ -45,7 +45,8 @@ from litepcie.software import generate_litepcie_software
 from litescope import LiteScopeAnalyzer
 
 from peripherals.windowRemapper import WindowRemapper
-from peripherals.hmcad15xx_adc import HMCAD15XXADC
+# from peripherals.hmcad15xx_adc import HMCAD15XXADC
+from peripherals.had1511_adc import HAD1511ADC
 from peripherals.trigger import Trigger
 
 
@@ -123,7 +124,7 @@ a7_484_io = [
     # ADC / HMCAD1511.
     # ----------------
 
-    # Control / Status / SPI.
+    # Control / Status.
     ("adc_control", 0,
         Subsignal("acq_en", Pins("J20")), # TPS7A9101/LDO Enable.
         Subsignal("osc_oe", Pins("K14")), # LMK61E2/PLL Output Enable.
@@ -211,7 +212,7 @@ a7_325_io = [
     # ADC / HMCAD1511.
     # ----------------
 
-    # Control / Status / SPI.
+    # Control / Status.
     ("adc_control", 0,
         Subsignal("acq_en", Pins("M4")), # TPS7A9101/LDO Enable.
         Subsignal("osc_oe", Pins("N3")), # LMK61E2/PLL Output Enable.
@@ -250,11 +251,7 @@ a7_thunderscope_rev5 = [
 
     # Leds.
     # -----
-    ("user_led_n", 0,
-        Subsignal("red",  Pins("T15")),
-        Subsignal("green", Pins("R13")),
-        Subsignal("blue", Pins("U14")),
-        IOStandard("LVCMOS33")),
+    ("user_led_n", 0, Pins("T15 R13 U14"), IOStandard("LVCMOS33")), # Red/Green/Blue.
 
     # SPI Flash.
     # ----------
@@ -292,11 +289,20 @@ a7_thunderscope_rev5 = [
         Subsignal("term",        Pins("M14 K15 K17 V13"), IOStandard("LVCMOS33"))
     ),
 
+    # SPI busses.
+    # --------
     # Amplifier SPI
     ("main_spi", 0,
         Subsignal("clk",  Pins("P15")),
         Subsignal("cs_n", Pins("P16 M17 R17 U11")),
         Subsignal("mosi", Pins("N14")),
+        IOStandard("LVCMOS33"),
+    ),
+    # ADC SPI
+    ("adc_spi", 0,
+        Subsignal("clk",  Pins("U16")),
+        Subsignal("cs_n", Pins("U17")),
+        Subsignal("mosi", Pins("R16")),
         IOStandard("LVCMOS33"),
     ),
 
@@ -316,7 +322,7 @@ a7_thunderscope_rev5 = [
     # ADC / HMCAD1511.
     # ----------------
 
-    # Control / Status / SPI.
+    # Control / Status.
     ("adc_control", 0,
         Subsignal("acq_en",      Pins("T17"), IOStandard("LVCMOS33")),
         Subsignal("acq_pg",      Pins("V17"), IOStandard("LVCMOS33")),
@@ -324,12 +330,6 @@ a7_thunderscope_rev5 = [
         IOStandard("LVCMOS33"),
     ),
 
-    ("adc_spi", 0,
-        Subsignal("clk",  Pins("U16")),
-        Subsignal("cs_n", Pins("U17")),
-        Subsignal("mosi", Pins("R16")),
-        IOStandard("LVCMOS33"),
-    ),
 
     # Datapath.
     ("adc_data", 0,
@@ -500,7 +500,14 @@ class BaseSoC(SoCMini):
         "flash_adapter": 9,
         "icap": 10,
         "xadc": 11,
-        "device": 12,
+        "dev_status": 12,
+        "adc": 13,
+        "frontend": 14,
+        "probe_compensation": 15,
+        "i2cbus": 16,
+        "spibus": 17
+        # Max Offset: 31
+        # Offset 32+ reserved for ota mem
     }
     SoCCore.mem_map = {
         "csr": 0x0000_0000,
@@ -540,32 +547,32 @@ class BaseSoC(SoCMini):
         
         class DeviceStatus(Module, AutoCSR):
             def __init__(self, led_pads, hw_id_pads, sys_clk_freq):
-
-                self.leds = leds = LedChaser(
-                    pads         = led_pads,
-                    sys_clk_freq = sys_clk_freq,
-                    polarity     = 1,
-                )
-                # self.leds.add_pwm(default_width=128, default_period=1024) # Default to 1/8 to reduce brightness.
-
+                
+                # Status LEDs
+                self._leds = CSRStorage(8, description="Status LED Bits")
+                
                 # HW ID Pins
                 self._hw_id = hw_id = CSRStatus(fields=[
                                     CSRField("hw_rev", offset=0, size=3, description="HW Revision."),
                                     CSRField("hw_variant", offset=8, size=1, description="HW Bus Variant.", values=[
                                         ("``0b0``", "PCIe"),
-                                        ("``0b1``", "USB"),
+                                        ("``0b1``", "TB"),
                                     ]),
-                                    CSRField("hw_valid", offset=9, size=1, description="HW ID is valid for this board.")
+                                    CSRField("hw_valid", offset=9, size=1, description="HW ID is valid for this board."),
+                                    CSRField("num_leds", offset=16, size=4, description="Number of LEDs available")
                                 ])
 
+                if led_pads is not None:
+                    self.comb += led_pads.eq(self._leds.storage)
+
                 if hw_id_pads is not None:
-                    self.sync += [
+                    self.comb += [
                         hw_id.fields.hw_rev.eq(hw_id_pads.hw_rev),
                         hw_id.fields.hw_variant.eq(hw_id_pads.hw_variant),
                         hw_id.fields.hw_valid.eq(1)
                     ]
                 else:
-                    self.sync += [
+                    self.comb += [
                         hw_id.fields.hw_rev.eq(0),
                         hw_id.fields.hw_variant.eq(0),
                         hw_id.fields.hw_valid.eq(0)
@@ -655,15 +662,55 @@ class BaseSoC(SoCMini):
         # - PLL      (ZL30260 @ 0x74).
         # - Digi-pot (MCP4432 @ 0x2C).
         # # #
-        i2c_pads = platform.request("i2c", loose=True)
+        class I2C_Busses(LiteXModule):
+            bus_count = 0
+            def _init_(self):
+                self.bus_count = 0
 
+            def add_bus(self, i2c_pads):
+                # I2C
+                self.add_module(f"i2c{self.bus_count}", LiteI2C(sys_clk_freq=sys_clk_freq, pads=i2c_pads))
+                self.bus_count += 1
+
+        self.submodules.i2cbus = i2c_group = I2C_Busses()
+        i2c_pads = platform.request("i2c", loose=True)
         if i2c_pads is not None:
-            # Rev4 design has a single I2C bus
-            self.submodules.i2c = LiteI2C(sys_clk_freq=sys_clk_freq, pads=i2c_pads)
-        else:
-            # Rev5 design splits the Trim and PLL I2C busses
-            self.submodules.i2c = LiteI2C(sys_clk_freq=sys_clk_freq, pads=platform.request("trim_i2c"))
-            self.submodules.pll_i2c = LiteI2C(sys_clk_freq=sys_clk_freq, pads=platform.request("pll_i2c"))
+            i2c_group.add_bus(i2c_pads)
+        
+        i2c_pads = platform.request("trim_i2c", loose=True)
+        if i2c_pads is not None:
+            i2c_group.add_bus(i2c_pads)
+        
+        i2c_pads = platform.request("pll_i2c", loose=True)
+        if i2c_pads is not None:
+            i2c_group.add_bus(i2c_pads)
+
+        # SPI Bus
+        class SPI_Busses(LiteXModule):
+            bus_count = 0
+            def _init_(self):
+                self.bus_count = 0
+
+            def add_master(self, spi_pads, spi_freq, sys_freq, width):
+                if not hasattr(spi_pads, "miso"):
+                    spi_pads.miso = Signal()
+                self.add_module(f"spi{self.bus_count}", SPIMaster(
+                                        pads         = spi_pads,
+                                        data_width   = width,
+                                        sys_clk_freq = sys_freq,
+                                        spi_clk_freq = spi_freq
+                                    ))
+                self.bus_count += 1
+
+        self.submodules.spibus = spi_group = SPI_Busses()
+
+        spi_pads = platform.request("main_spi", loose=True)
+        if spi_pads is not None:
+            spi_group.add_master(spi_pads, 1e6, sys_clk_freq, 24)
+            
+        spi_pads = platform.request("adc_spi", loose=True)
+        if spi_pads is not None:
+            spi_group.add_master(spi_pads, 1e6, sys_clk_freq, 24)
 
         # Probe Compensation.
         self.submodules.probe_compensation = PWM(
@@ -671,17 +718,6 @@ class BaseSoC(SoCMini):
             default_enable = 1,
             default_width  = int(1e-3*sys_clk_freq/2),
             default_period = int(1e-3*sys_clk_freq)
-        )
-
-        
-        main_spi_pads = platform.request("main_spi")
-        main_spi_clk_freq = 1e6
-        main_spi_pads.miso = Signal()
-        self.submodules.main_spi = main_spi = SPIMaster(
-            pads         = main_spi_pads,
-            data_width   = 24,
-            sys_clk_freq = sys_clk_freq,
-            spi_clk_freq = main_spi_clk_freq
         )
 
 
@@ -742,7 +778,7 @@ class BaseSoC(SoCMini):
         if with_adc:
 
             class ADC(Module, AutoCSR):
-                def __init__(self, control_pads, spi_pads, data_pads, sys_clk_freq,
+                def __init__(self, control_pads, data_pads, sys_clk_freq,
                     data_width = 128, frame_polarity = 1, data_polarity = [1, 1, 0, 1, 1, 1, 1, 1]
                 ):
 
@@ -780,20 +816,6 @@ class BaseSoC(SoCMini):
 
                     # Control-Path -----------------------------------------------------------------
 
-                    # SPI
-                    
-                    if spi_pads is not None:
-                        # Rev5 design has a deidcated SPI bus for the ADC
-                        adc_spi_clk_freq = 1e6
-                        if not hasattr(spi_pads, "miso"):
-                            spi_pads.miso = Signal()
-                        self.submodules.spi = SPIMaster(
-                                                    pads         = spi_pads,
-                                                    data_width   = 24,
-                                                    sys_clk_freq = sys_clk_freq,
-                                                    spi_clk_freq = adc_spi_clk_freq
-                                                )
-
                     # Control.
                     self.comb += [
                         control_pads.acq_en.eq(self._control.fields.acq_en),
@@ -809,8 +831,10 @@ class BaseSoC(SoCMini):
                     # Trigger.
                     self.submodules.trigger = Trigger()
 
-                    # HAD1520.
-                    self.submodules.had1520 = HMCAD15XXADC(data_pads, sys_clk_freq, frame_polarity, lanes_polarity=data_polarity)
+                    # HMCAD15XX.
+                    # self.submodules.hmcad1520 = HMCAD15XXADC(data_pads, sys_clk_freq, frame_polarity, lanes_polarity=data_polarity)
+                    self.submodules.hmcad1520 = HAD1511ADC(data_pads, sys_clk_freq, lanes_polarity=data_polarity)
+                    self.submodules.conv = stream.Converter(64, data_width)
 
                     # Gate.
                     self.submodules.gate = stream.Gate([("data", 128)], sink_ready_when_disabled=True)
@@ -818,7 +842,8 @@ class BaseSoC(SoCMini):
 
                     # Pipeline.
                     self.submodules += stream.Pipeline(
-                        self.had1520,
+                        self.hmcad1520,
+                        self.conv,
                         self.gate,
                         self.source
                     )
@@ -840,7 +865,6 @@ class BaseSoC(SoCMini):
 
             self.submodules.adc = ADC(
                 control_pads = platform.request("adc_control"),
-                spi_pads     = platform.request("adc_spi", loose=True),
                 data_pads    = platform.request("adc_data"),
                 sys_clk_freq = sys_clk_freq,
                 frame_polarity=frame_polarity[variant],
