@@ -833,7 +833,7 @@ class BaseSoC(SoCMini):
 
                     # HMCAD15XX.
                     # self.submodules.hmcad1520 = HMCAD15XXADC(data_pads, sys_clk_freq, frame_polarity, lanes_polarity=data_polarity)
-                    self.submodules.hmcad1520 = HAD1511ADC(data_pads, sys_clk_freq, lanes_polarity=data_polarity)
+                    self.submodules.hmcad1520 = HAD1511ADC(data_pads, sys_clk_freq, frame_polarity, lanes_polarity=data_polarity)
                     self.submodules.conv = stream.Converter(64, data_width)
 
                     # Gate.

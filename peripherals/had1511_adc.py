@@ -60,7 +60,7 @@ had1511_phy_layout = ["fclk_p", "fclk_n", "lclk_p", "lclk_n", "d_p", "d_n"]
 # HAD1511 ADC --------------------------------------------------------------------------------------
 
 class HAD1511ADC(LiteXModule):
-    def __init__(self, pads, sys_clk_freq, lanes_polarity=[0]*8, clock_domain="sys"):
+    def __init__(self, pads, sys_clk_freq, frame_polarity=0, lanes_polarity=[0]*8, clock_domain="sys"):
         # Parameters.
         if pads is not None:
             nchannels = len(pads.d_p)
@@ -186,8 +186,12 @@ class HAD1511ADC(LiteXModule):
                 bitslip.eq(0),
                 fclk_timer.wait.eq(~fclk_timer.done),
                 If(fclk_timer.done,
-                    If((fclk != 0xf) & (fclk != 0x33) & (fclk != 0x55),
-                        bitslip.eq(1)
+                    If(frame_polarity,
+                        If((fclk != 0xf0) & (fclk != 0xCC) & (fclk != 0xAA),
+                            bitslip.eq(1)
+                        )
+                    ).Elif((fclk != 0xf) & (fclk != 0x33) & (fclk != 0x55),
+                            bitslip.eq(1)
                     )
                 )
             ]
