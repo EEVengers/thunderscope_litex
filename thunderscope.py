@@ -293,9 +293,9 @@ a7_thunderscope_rev5 = [
     # --------
     # Amplifier SPI
     ("main_spi", 0,
-        Subsignal("clk",  Pins("P15")),
+        Subsignal("clk",  Pins("N14")),
         Subsignal("cs_n", Pins("P16 M17 R17 U11")),
-        Subsignal("mosi", Pins("N14")),
+        Subsignal("mosi", Pins("P15")),
         IOStandard("LVCMOS33"),
     ),
     # ADC SPI
