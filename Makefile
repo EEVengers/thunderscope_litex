@@ -19,7 +19,10 @@ PROD_VARIANTS:= dev prod
 RELEASE_VARIANTS= $(PROD_VARIANTS)
 
 # Collect all possible variants
-ALL_VARIANTS= $(RELEASE_VARIANTS) $(BETA_VARIANTS)
+ALL_VARIANTS=$(RELEASE_VARIANTS) $(BETA_VARIANTS)
+
+# LiteX Generate-only targets
+GEN_VARIANTS=$(patsubst %,gen-%, $(ALL_VARIANTS))
 
 # Paths to use for building
 BUILD_PATH:= build
@@ -48,6 +51,14 @@ $(ALL_VARIANTS) : $(SOURCES)
 	@cp $(BUILD_PATH)/$(PROJECT)_$@/gateware/$(PROJECT)_full.mcs $(DIST_PATH)/$@/$(PROJECT)_full_$@_$(BUILD_VERSION).mcs
 	@cp $(BUILD_PATH)/$(PROJECT)_$@/gateware/$(PROJECT)_update.bin $(DIST_PATH)/$@/$(PROJECT)_update_$@_$(BUILD_VERSION).bin
 	@cp $(BUILD_PATH)/$(PROJECT)_$@/gateware/$(PROJECT)_update.bit $(DIST_PATH)/$@/$(PROJECT)_update_$@_$(BUILD_VERSION).bit
+
+
+.PHONY: gen $(GEN_VARIANTS)
+gen: $(GEN_VARIANTS)
+
+$(GEN_VARIANTS): gen-% : $(SOURCES)
+	$(PY) $(PROJECT).py --variant=$* --output-dir=$(BUILD_PATH)/$(PROJECT)_$*
+
 
 driver:
 	$(PY) $(PROJECT).py --driver --driver-dir=$(BUILD_PATH)/$(PROJECT)/driver
