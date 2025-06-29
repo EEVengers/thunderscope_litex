@@ -37,15 +37,16 @@ $ sudo ./litex_setup.py init install
 [> Build and Load the bitstream
 --------------------------------
 ```sh
-$ ./thunderscope --variant=a200t --driver --build --load
+$ ./thunderscope --variant=dev --driver --build --load
 ```
 
-| Variant Arg | Target                    |
-| :---------: | :-----------------------: |
-| `a200t`     | Trenz TE0712 200T Module  |
-| `a100t`     | Trenz TE0712 100T Module  |
-| `a50t`      | Custom Rev2 A50T Module   |
-| `a35t`      | Representative Production |
+| Variant Arg | Target                                   |
+| :---------: | :--------------------------------------: |
+| `a200t`     | Trenz TE0712 200T Module                 |
+| `a100t`     | Trenz TE0712 100T Module                 |
+| `a50t`      | Custom Rev2 A50T Module                  |
+| `dev`       | Rev5 Developer Thunderscope A50T Design  |
+| `prod`      | Rev5 Production Thunderscope A35T Design |
 
 [> Open LiteX server
 --------------------
@@ -83,7 +84,7 @@ $ glscopeclient --debug myscope:enjoy-digital:lan:127.0.0.1
 
 The Trenz A100T and A200T modules include a 256Mb SPI Flash chip, the A50T/A35T builds use a 32Mb SPI Flash.  The larger chips' bitstream does not fit into the flash used on the smaller design, therefore we have two Flash partition tables.
 
-**A35T/A50T (0x80_0000):**
+**A50T/Dev/Prod (0x80_0000):**
 
 | Address Range          | Content                   |
 | :--------------------: | :-----------------        |

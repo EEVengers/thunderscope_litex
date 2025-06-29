@@ -13,6 +13,7 @@ from migen.genlib.resetsync import AsyncResetSynchronizer
 from migen.genlib.misc import WaitTimer
 
 from litex.gen import *
+from litex.build.io import *
 
 from litex.soc.interconnect.csr import *
 from litex.soc.interconnect import stream
@@ -57,10 +58,90 @@ HAD1511_ADC_GAIN_9DB = 9
 
 had1511_phy_layout = ["fclk_p", "fclk_n", "lclk_p", "lclk_n", "d_p", "d_n"]
 
-# HAD1511 ADC --------------------------------------------------------------------------------------
+# SERDES Lane
 
-class HAD1511ADC(LiteXModule):
-    def __init__(self, pads, sys_clk_freq, frame_polarity=0, lanes_polarity=[0]*8, clock_domain="sys"):
+"""
+                                                                                                Bitclock  :  Sys Clock                
+                                                                                                          :             
+                        +------------+      +------------+      +----------+     +-----------+       +----------+              
+                        |            |      |            |      |          |     |           |       |    :     |               
+ Differential Pads ---->| IBUFDS    >|-- -->|  IDELAY   >|----->|  IDDR   >|-/2->|  Packer  >|--/16->|  AFIFO   |---/16----> d
+                        |            |      |            |      |          |     |           |       |    :     |                
+                        +------------+      +------------+      +----------+     +-----------+       +----------+                      
+                                                                                       ^ ^             ^  :                            
+                                                                                       | |             |  :                                 
+             Frame --------------------------------------------------------------------+ |             |  :
+        Frame Edge ----------------------------------------------------------------------+-------------+  :
+"""
+
+class LVDSLane(LiteXModule):
+    def __init__(self, d_p, d_n, frame_edge, polarity, delay_inc, delay_rst):
+        d_no_delay = Signal()
+        d_delayed  = Signal()
+        d_sdr      = Signal(2)
+        d_shift    = Signal(16)
+        self.d = d = Signal(16)
+
+
+        self.specials += [
+            Instance("IBUFDS",
+                i_I  = d_p,
+                i_IB = d_n,
+                o_O  = d_no_delay
+            ),
+            Instance("IDELAYE2",
+                p_DELAY_SRC             = "IDATAIN",
+                p_SIGNAL_PATTERN        = "DATA",
+                p_CINVCTRL_SEL          = "FALSE",
+                p_HIGH_PERFORMANCE_MODE = "TRUE",
+                p_REFCLK_FREQUENCY      = 200.0,
+                p_PIPE_SEL              = "FALSE",
+                p_IDELAY_TYPE           = "VARIABLE",
+                p_IDELAY_VALUE          = 0,
+
+                i_C        = ClockSignal("sys"),
+                i_LD       = delay_rst,
+                i_CE       = delay_inc,
+                i_LDPIPEEN = 0,
+                i_INC      = 1,
+
+                i_IDATAIN  = d_no_delay,
+                o_DATAOUT  = d_delayed
+            ),
+            Instance("IDDR",
+                i_C  = ClockSignal("adc"), # Clock
+                i_CE = 1,
+                i_R  = ResetSignal("adc_reset"), # Reset
+                i_S  = 0,
+                i_D  = d_delayed,
+                **{f"o_Q{n+1}": d_sdr[n] for n in range(2)},
+            )
+        ]
+
+       
+        # Variable Width Deserializer
+
+        self.sync.adc += [
+            If( frame_edge, d.eq(d_shift), d_shift[2:16].eq(0)).Else(
+            d_shift[2:16].eq(d_shift[0:14])),
+            d_shift[0:1].eq(d_sdr if polarity == 0 else (d_sdr ^ 0x3))
+        ]
+        
+        # Async Fifo to put data in sys clk domain
+        fifo = stream.AsyncFIFO([("data", 16)])
+        fifo = ClockDomainsRenamer({"write": "adc_frame", "read": "sys"})(fifo)
+        self.submodules += fifo
+
+        self.comb += [
+            fifo.sink.valid.eq(frame_edge),
+            fifo.sink.data.eq(d)
+        ]
+
+
+# HAD1520 ADC --------------------------------------------------------------------------------------
+
+class HMCAD15XXADC(LiteXModule):
+    def __init__(self, pads, sys_clk_freq, frame_polarity, lanes_polarity=[0]*8, clock_domain="sys"):
         # Parameters.
         if pads is not None:
             nchannels = len(pads.d_p)
@@ -70,7 +151,7 @@ class HAD1511ADC(LiteXModule):
             nchannels = 8
 
         # ADC stream.
-        self.source = source = stream.Endpoint([("data", nchannels*8)])
+        self.source = source = stream.Endpoint([("data", nchannels*16)])
 
         # Control/Status.
         self._control      = CSRStorage(fields=[
@@ -82,33 +163,42 @@ class HAD1511ADC(LiteXModule):
         self._status       = CSRStatus() # Unused (for now).
         self._downsampling = CSRStorage(32, description="ADC Downsampling ratio.")
         self._range        = CSRStatus(fields=[
-            CSRField("min01", size=8, offset= 0, description="ADC0/1 Min value since last stat_rst."),
-            CSRField("max01", size=8, offset= 8, description="ADC0/1 Max value since last stat_rst."),
-            CSRField("min23", size=8, offset=16, description="ADC2/3 Min value since last stat_rst."),
-            CSRField("max23", size=8, offset=24, description="ADC2/3 Max value since last stat_rst."),
+            CSRField("min01", size=16, offset= 0, description="ADC0/1 Min value since last stat_rst."),
+            CSRField("max01", size=16, offset=16, description="ADC0/1 Max value since last stat_rst."),
+            CSRField("min23", size=16, offset=32, description="ADC2/3 Min value since last stat_rst."),
+            CSRField("max23", size=16, offset=48, description="ADC2/3 Max value since last stat_rst."),
         ])
         self._bitslip_count = CSRStatus(32, description="ADC bitslip count (with rollover).")
         self._sample_count  = CSRStatus(32, description="ADC samples count since last stat_rst.")
         self._data_channels = CSRStorage(fields=[
-            CSRField("shuffle",     offset=0, size=2, reset=0, description="Number of enabled channels to control shuffling of samples",
+            CSRField("shuffle",     offset=0, size=3, reset=0, description="Number of enabled channels to control shuffling of samples",
                     values=[
-                        (0, "Passthrough"),
-                        (1, "2-Channel Shuffling"),
-                        (2, "4-Channel Shuffling")
+                        (0, "Passthrough."),
+                        (1, "2-Channel Shuffle."),
+                        (2, "4-Channel Shuffle."),
+                        (3, "2-Channel 16bit Shuffle."),
+                        (4, "4-Channel 16bit Shuffle.")
                     ]),
-            CSRField("run_length",  offset=2, size=6, reset=1, description="Control Run-Length of samples for each channel ordered next to each other")
+            CSRField("run_length",  offset=3, size=5, reset=1, description="Control Run-Length of samples for each channel ordered next to each other"),
+            CSRField("data_width",offset=8, size=1, pulse=False, description="Select the deserializer data width.",
+                    values=[
+                        (0b0, "8-bit"),
+                        (0b1, "12-bit")
+                    ])
         ])
 
         # # #
 
 
-        # Clocking.
+        # Bit and Frame clocking.
         # ---------
 
         if pads is not None:
             self.clock_domains.cd_adc       = ClockDomain() # ADC Bitclock.
-            self.clock_domains.cd_adc_frame = ClockDomain() # ADC Frameclock (freq : ADC Bitclock/8).
+
             adc_clk = Signal()
+            adc_frame = Signal()
+            adc_frame_delayed = Signal()
             self.specials += Instance("IBUFDS",
                 i_I  = pads.lclk_p,
                 i_IB = pads.lclk_n,
@@ -118,28 +208,13 @@ class HAD1511ADC(LiteXModule):
                 i_I = adc_clk,
                 o_O = ClockSignal("adc")
             )
-            self.specials += Instance("BUFR",
-                p_BUFR_DIVIDE = "4",
-                i_I = adc_clk,
-                o_O = ClockSignal("adc_frame")
-            )
-            self.specials += AsyncResetSynchronizer(self.cd_adc_frame, self._control.fields.frame_rst)
-
-        # LVDS Reception & Deserialization.
-        # ---------------------------------
-
-        if pads is not None:
-            self.bitslip       = bitslip       = Signal()
-            self.fclk          = fclk          = Signal(8)
-            self.fclk_no_delay = fclk_no_delay = Signal()
-            self.fclk_delayed  = fclk_delayed  = Signal()
-
+            
             # Receive & Deserialize Frame clock to use it as a delimiter for the data.
             self.specials += [
                 Instance("IBUFDS",
                     i_I  = pads.fclk_p,
                     i_IB = pads.fclk_n,
-                    o_O  = fclk_no_delay
+                    o_O  = adc_frame
                 ),
                 Instance("IDELAYE2",
                     p_DELAY_SRC             = "IDATAIN",
@@ -157,98 +232,126 @@ class HAD1511ADC(LiteXModule):
                     i_LDPIPEEN = 0,
                     i_INC      = 1,
 
-                    i_IDATAIN  = fclk_no_delay,
-                    o_DATAOUT  = fclk_delayed
-                ),
-                Instance("ISERDESE2",
-                    p_DATA_WIDTH     = 8,
-                    p_DATA_RATE      = "DDR",
-                    p_SERDES_MODE    = "MASTER",
-                    p_INTERFACE_TYPE = "NETWORKING",
-                    p_NUM_CE         = 1,
-                    p_IOBDELAY       = "IFD",
-                    i_DDLY    = fclk_delayed,
-                    i_CE1     = 1,
-                    i_RST     =  ResetSignal("adc_frame"),
-                    i_CLK     =  ClockSignal("adc"),
-                    i_CLKB    = ~ClockSignal("adc"),
-                    i_CLKDIV  =  ClockSignal("adc_frame"),
-                    i_BITSLIP = bitslip,
-                     **{f"o_Q{n+1}": fclk[8-1-n] for n in range(8)},
+                    i_IDATAIN  = adc_frame,
+                    o_DATAOUT  = adc_frame_delayed
                 )
             ]
+            self.specials += [AsyncResetSynchronizer(self.cd_adc,  self._control.fields.frame_rst)]
 
-            # Check Frame clock synchronization and increment bitslip every 1 ms when not synchronized.
-            fclk_timer = WaitTimer(int(1e-3*sys_clk_freq))
-            fclk_timer = ClockDomainsRenamer("adc_frame")(fclk_timer)
-            self.submodules += fclk_timer
-            self.sync.adc_frame += [
-                bitslip.eq(0),
-                fclk_timer.wait.eq(~fclk_timer.done),
-                If(fclk_timer.done,
-                    If(frame_polarity,
-                        If((fclk != 0xf0) & (fclk != 0xCC) & (fclk != 0xAA),
-                            bitslip.eq(1)
-                        )
-                    ).Elif((fclk != 0xf) & (fclk != 0x33) & (fclk != 0x55),
-                            bitslip.eq(1)
-                    )
-                )
-            ]
+        # LVDS Reception & Deserialization.
+        # ---------------------------------
+
+        if pads is not None:
+            # self.bitslip       = bitslip       = Signal()
+            # self.fclk          = fclk          = Signal(16)
+            # self.fclk_no_delay = fclk_no_delay = Signal()
+            # self.fclk_delayed  = fclk_delayed  = Signal()
+
+            # # Receive & Deserialize Frame clock to use it as a delimiter for the data.
+            # self.specials += [
+            #     Instance("IBUFDS",
+            #         i_I  = pads.fclk_p,
+            #         i_IB = pads.fclk_n,
+            #         o_O  = fclk_no_delay
+            #     ),
+            #     Instance("IDELAYE2",
+            #         p_DELAY_SRC             = "IDATAIN",
+            #         p_SIGNAL_PATTERN        = "DATA",
+            #         p_CINVCTRL_SEL          = "FALSE",
+            #         p_HIGH_PERFORMANCE_MODE = "TRUE",
+            #         p_REFCLK_FREQUENCY      = 200.0,
+            #         p_PIPE_SEL              = "FALSE",
+            #         p_IDELAY_TYPE           = "VARIABLE",
+            #         p_IDELAY_VALUE          = 0,
+
+            #         i_C        = ClockSignal("sys"),
+            #         i_LD       = self._control.fields.delay_rst,
+            #         i_CE       = self._control.fields.delay_inc,
+            #         i_LDPIPEEN = 0,
+            #         i_INC      = 1,
+
+            #         i_IDATAIN  = fclk_no_delay,
+            #         o_DATAOUT  = fclk_delayed
+            #     ),
+                # Instance("ISERDESE2",
+                #     p_DATA_WIDTH     = 8,
+                #     p_DATA_RATE      = "DDR",
+                #     p_SERDES_MODE    = "MASTER",
+                #     p_INTERFACE_TYPE = "NETWORKING",
+                #     p_NUM_CE         = 1,
+                #     p_IOBDELAY       = "IFD",
+                #     i_DDLY    = fclk_delayed,
+                #     i_CE1     = 1,
+                #     i_RST     =  ResetSignal("adc8_frame"),
+                #     i_CLK     =  ClockSignal("adc"),
+                #     i_CLKB    = ~ClockSignal("adc"),
+                #     i_CLKDIV  =  ClockSignal("adc8_frame"),
+                #     i_BITSLIP = bitslip,
+                #      **{f"o_Q{n+1}": fclk[8-1-n] for n in range(8)},
+                # )
+            # ]
+
 
             # Receive & Deserialize Data.
-            self.adc_source = adc_source = stream.Endpoint([("data", nchannels*8)])
-            self.comb += adc_source.valid.eq(1)
+            self.adc_source = adc_source = stream.Endpoint([("data", nchannels*16)])
+            self.comb += adc_source.valid.eq(adc_frame_delayed)
+            channels = {}
             for i in range(nchannels):
-                d_no_delay = Signal()
-                d_delayed  = Signal()
-                d          = Signal(8)
-                self.specials += [
-                    Instance("IBUFDS",
-                        i_I  = pads.d_p[i],
-                        i_IB = pads.d_n[i],
-                        o_O  = d_no_delay
-                    ),
-                    Instance("IDELAYE2",
-                        p_DELAY_SRC             = "IDATAIN",
-                        p_SIGNAL_PATTERN        = "DATA",
-                        p_CINVCTRL_SEL          = "FALSE",
-                        p_HIGH_PERFORMANCE_MODE = "TRUE",
-                        p_REFCLK_FREQUENCY      = 200.0,
-                        p_PIPE_SEL              = "FALSE",
-                        p_IDELAY_TYPE           = "VARIABLE",
-                        p_IDELAY_VALUE          = 0,
+                channels[i] = LVDSLane(pads.d_p[i], pads.d_n[i],
+                                       adc_frame_delayed, lanes_polarity[i],
+                                       self._control.fields.delay_inc, self._control.fields.delay_rst)
+                self.comb += adc_source.data[16*i:16*(i+1)].eq(channels[i].d)
 
-                        i_C        = ClockSignal("sys"),
-                        i_LD       = self._control.fields.delay_rst,
-                        i_CE       = self._control.fields.delay_inc,
-                        i_LDPIPEEN = 0,
-                        i_INC      = 1,
 
-                        i_IDATAIN  = d_no_delay,
-                        o_DATAOUT  = d_delayed
-                    ),
-                    Instance("ISERDESE2",
-                        p_DATA_WIDTH     = 8,
-                        p_DATA_RATE      = "DDR",
-                        p_SERDES_MODE    = "MASTER",
-                        p_INTERFACE_TYPE = "NETWORKING",
-                        p_NUM_CE         = 1,
-                        p_IOBDELAY       = "IFD",
-                        i_DDLY    = d_delayed,
-                        i_CE1     = 1,
-                        i_RST     =  ResetSignal("adc_frame"),
-                        i_CLK     =  ClockSignal("adc"),
-                        i_CLKB    = ~ClockSignal("adc"),
-                        i_CLKDIV  =  ClockSignal("adc_frame"),
-                        i_BITSLIP = bitslip,
-                         **{f"o_Q{n+1}": d[8-1-n] for n in range(8)},
-                    )
-                ]
-                self.comb += adc_source.data[8*i:8*(i+1)].eq(d if lanes_polarity[i] == 0 else (d ^ 0xff))
+                # d_no_delay = Signal()
+                # d_delayed  = Signal()
+                # d          = Signal(8)
+                # self.specials += [
+                #     Instance("IBUFDS",
+                #         i_I  = pads.d_p[i],
+                #         i_IB = pads.d_n[i],
+                #         o_O  = d_no_delay
+                #     ),
+                #     Instance("IDELAYE2",
+                #         p_DELAY_SRC             = "IDATAIN",
+                #         p_SIGNAL_PATTERN        = "DATA",
+                #         p_CINVCTRL_SEL          = "FALSE",
+                #         p_HIGH_PERFORMANCE_MODE = "TRUE",
+                #         p_REFCLK_FREQUENCY      = 200.0,
+                #         p_PIPE_SEL              = "FALSE",
+                #         p_IDELAY_TYPE           = "VARIABLE",
+                #         p_IDELAY_VALUE          = 0,
+
+                #         i_C        = ClockSignal("sys"),
+                #         i_LD       = self._control.fields.delay_rst,
+                #         i_CE       = self._control.fields.delay_inc,
+                #         i_LDPIPEEN = 0,
+                #         i_INC      = 1,
+
+                #         i_IDATAIN  = d_no_delay,
+                #         o_DATAOUT  = d_delayed
+                #     ),
+                #     Instance("ISERDESE2",
+                #         p_DATA_WIDTH     = 8,
+                #         p_DATA_RATE      = "DDR",
+                #         p_SERDES_MODE    = "MASTER",
+                #         p_INTERFACE_TYPE = "NETWORKING",
+                #         p_NUM_CE         = 1,
+                #         p_IOBDELAY       = "IFD",
+                #         i_DDLY    = d_delayed,
+                #         i_CE1     = 1,
+                #         i_RST     =  ResetSignal("adc8_frame"),
+                #         i_CLK     =  ClockSignal("adc"),
+                #         i_CLKB    = ~ClockSignal("adc"),
+                #         i_CLKDIV  =  ClockSignal("adc8_frame"),
+                #         i_BITSLIP = bitslip,
+                #          **{f"o_Q{n+1}": d[8-1-n] for n in range(8)},
+                #     )
+                # ]
+                # self.comb += adc_source.data[8*i:8*(i+1)].eq(d if lanes_polarity[i] == 0 else (d ^ 0xff))
 
         if pads is None:
-            self.adc_source = adc_source = stream.Endpoint([("data", nchannels*8)])
+            self.adc_source = adc_source = stream.Endpoint([("data", nchannels*16)])
             self.comb += adc_source.valid.eq(1)
             # Generate a Ramp Pattern when no pads are provided.
             for i in range(nchannels):
@@ -256,17 +359,18 @@ class HAD1511ADC(LiteXModule):
                 self.sync += adc_data.eq(adc_data + nchannels)
                 self.sync += adc_source.data[8*i:8*(i+1)].eq(adc_data + i)
 
+
         # Clock Domain Crossing.
         # ----------------------
 
-        self.submodules.cdc = stream.ClockDomainCrossing(
-            layout   = [("data", nchannels*8)],
-            cd_from  = "adc_frame" if pads is not None else clock_domain,
-            cd_to    = clock_domain,
-            buffered = True,
-            depth    = 256
-        )
-        self.comb += self.adc_source.connect(self.cdc.sink)
+        # self.submodules.cdc = stream.ClockDomainCrossing(
+        #     layout   = [("data", nchannels*16)],
+        #     cd_from  = "adc_frame_mux" if pads is not None else clock_domain,
+        #     cd_to    = clock_domain,
+        #     buffered = True,
+        #     depth    = 512
+        # )
+        # self.comb += self.adc_source.connect(self.cdc.sink)
 
         # Shuffler.
         # ---------
@@ -279,7 +383,7 @@ class HAD1511ADC(LiteXModule):
                                                          [0, 4, 1, 5, 2, 6, 3, 7],
                                                          [0, 2, 4, 6, 1, 3, 5, 7]])
         self.comb += self.adc_shuffler.shuffle.eq(self._data_channels.fields.shuffle)
-        self.comb += self.cdc.source.connect(self.adc_shuffler.sink)
+        self.comb += self.adc_source.connect(self.adc_shuffler.sink)
 
         # DownSampling.
         # -------------
@@ -316,10 +420,10 @@ class HAD1511ADC(LiteXModule):
                 ),
             ]
 
-        if pads is not None:
-            # BitSlips Count.
-            bitslip_count = self._bitslip_count.status
-            self.sync.adc_frame += bitslip_count.eq(bitslip_count + self.bitslip)
+        # if pads is not None:
+        #     # BitSlips Count.
+        #     bitslip_count = self._bitslip_count.status
+        #     self.sync.adc8_frame += bitslip_count.eq(bitslip_count + self.bitslip)
 
         # Samples Count.
         sample_count = self._sample_count.status
@@ -340,7 +444,7 @@ class HAD1511ADC(LiteXModule):
 #                                  S O F T W A R E                                                 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-class HAD1511ADCDriver:
+class HMCAD15XXADCDriver:
     def __init__(self, bus, spi, n, mode="single"):
         assert mode in ["single", "dual"]
         self.bus     = bus

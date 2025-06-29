@@ -13,13 +13,16 @@ PROJECT:=thunderscope
 
 # List all build variants
 BETA_VARIANTS:= a50t a100t a200t
-
+PROD_VARIANTS:= dev prod
 
 # Define the set of supported variants to be built as part of a release
-RELEASE_VARIANTS= $(BETA_VARIANTS)
+RELEASE_VARIANTS= $(PROD_VARIANTS)
 
 # Collect all possible variants
-ALL_VARIANTS= $(RELEASE_VARIANTS) a35t
+ALL_VARIANTS=$(RELEASE_VARIANTS) $(BETA_VARIANTS)
+
+# LiteX Generate-only targets
+GEN_VARIANTS=$(patsubst %,gen-%, $(ALL_VARIANTS))
 
 # Paths to use for building
 BUILD_PATH:= build
@@ -49,12 +52,21 @@ $(ALL_VARIANTS) : $(SOURCES)
 	@cp $(BUILD_PATH)/$(PROJECT)_$@/gateware/$(PROJECT)_update.bin $(DIST_PATH)/$@/$(PROJECT)_update_$@_$(BUILD_VERSION).bin
 	@cp $(BUILD_PATH)/$(PROJECT)_$@/gateware/$(PROJECT)_update.bit $(DIST_PATH)/$@/$(PROJECT)_update_$@_$(BUILD_VERSION).bit
 
+
+.PHONY: gen $(GEN_VARIANTS)
+gen: $(GEN_VARIANTS)
+
+$(GEN_VARIANTS): gen-% : $(SOURCES)
+	$(PY) $(PROJECT).py --variant=$* --output-dir=$(BUILD_PATH)/$(PROJECT)_$*
+
+
 driver:
 	$(PY) $(PROJECT).py --driver --driver-dir=$(BUILD_PATH)/$(PROJECT)/driver
 
 docs:
-	$(PY) $(PROJECT).py --doc
-	@sphinx-build $(BUILD_PATH)/$(PROJECT)/doc doc
+	$(PY) $(PROJECT).py --variant=prod --doc
+	@sphinx-build $(BUILD_PATH)/$(PROJECT)/doc $(BUILD_PATH)/docs
+	zip -ur $(DIST_PATH)/$(PROJECT)_docs.zip $(BUILD_PATH)/docs/*
 
 distclean:
 	@rm -rf $(BUILD_PATH)/*
