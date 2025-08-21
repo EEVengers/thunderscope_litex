@@ -11,6 +11,8 @@ PY:=python3
 
 PROJECT:=thunderscope
 
+LITEX_RELEASE_TAG:=2024.12
+
 # List all build variants
 BETA_VARIANTS:= a50t a100t a200t
 PROD_VARIANTS:= dev prod
@@ -32,6 +34,29 @@ DIST_PATH:= distrib
 SRC_PATH:= . peripherals
 SOURCES:= $(foreach x, $(SRC_PATH), $(wildcard $(addprefix $(x)/*,.py*)))
 
+## Configure Virtual Environment
+VENV_PATH:=.venv
+
+ifeq ($(OS),Windows_NT)
+VENV_ACTIVATE:=$(VENV_PATH)/activate.bat
+else
+VENV_ACTIVATE:=. $(VENV_PATH)/bin/activate
+endif
+
+.PHONY: venv
+$(VENV_PATH)/.stamp_$(LITEX_RELEASE_TAG):
+	@rm -rf $(VENV_PATH)
+	$(PY) -m venv $(VENV_PATH)
+	$(VENV_ACTIVATE) && \
+	$(PY) -m pip install --upgrade pip && \
+	mkdir $(VENV_PATH)/litex && \
+	cd $(VENV_PATH)/litex && \
+	wget https://raw.githubusercontent.com/enjoy-digital/litex/master/litex_setup.py && \
+	$(PY) litex_setup.py --init --install --tag $(LITEX_RELEASE_TAG)
+	touch $(VENV_PATH)/.stamp_$(LITEX_RELEASE_TAG)
+
+venv: $(VENV_PATH)/.stamp_$(LITEX_RELEASE_TAG)
+	@echo "Using virtual environment, LiteX version: $(LITEX_RELEASE_TAG)"
 
 .PHONY: all release driver docs
 
@@ -43,7 +68,8 @@ release: $(RELEASE_VARIANTS) docs driver
 all: $(ALL_VARIANTS) docs driver
 
 
-$(ALL_VARIANTS) : $(SOURCES)
+$(ALL_VARIANTS) : $(SOURCES) venv
+	$(VENV_ACTIVATE) && \
 	$(PY) $(PROJECT).py --variant=$@ --build --output-dir=$(BUILD_PATH)/$(PROJECT)_$@
 	# Copy to destination folder
 	@mkdir -p $(DIST_PATH)/$@
@@ -54,16 +80,19 @@ $(ALL_VARIANTS) : $(SOURCES)
 
 
 .PHONY: gen $(GEN_VARIANTS)
-gen: $(GEN_VARIANTS)
+gen: $(GEN_VARIANTS) venv
 
 $(GEN_VARIANTS): gen-% : $(SOURCES)
+	$(VENV_ACTIVATE) && \
 	$(PY) $(PROJECT).py --variant=$* --output-dir=$(BUILD_PATH)/$(PROJECT)_$*
 
 
-driver:
+driver: venv
+	$(VENV_ACTIVATE) && \
 	$(PY) $(PROJECT).py --driver --driver-dir=$(BUILD_PATH)/$(PROJECT)/driver
 
-docs:
+docs: venv
+	$(VENV_ACTIVATE) && \
 	$(PY) $(PROJECT).py --variant=prod --doc
 	@sphinx-build $(BUILD_PATH)/$(PROJECT)/doc $(BUILD_PATH)/docs
 	zip -ur $(DIST_PATH)/$(PROJECT)_docs.zip $(BUILD_PATH)/docs/*
