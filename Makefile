@@ -48,7 +48,8 @@ $(VENV_PATH)/.stamp_$(LITEX_RELEASE_TAG):
 	@rm -rf $(VENV_PATH)
 	$(PY) -m venv $(VENV_PATH)
 	$(VENV_ACTIVATE) && \
-	$(PY) -m pip install --upgrade pip && \
+	pip install --upgrade pip && \
+	pip install -r requirements.txt && \
 	mkdir $(VENV_PATH)/litex && \
 	cd $(VENV_PATH)/litex && \
 	wget https://raw.githubusercontent.com/enjoy-digital/litex/master/litex_setup.py && \
