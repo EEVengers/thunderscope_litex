@@ -45,8 +45,7 @@ from litepcie.software import generate_litepcie_software
 from litescope import LiteScopeAnalyzer
 
 from peripherals.windowRemapper import WindowRemapper
-# from peripherals.hmcad15xx_adc import HMCAD15XXADC
-from peripherals.had1511_adc import HAD1511ADC
+from peripherals.hmcad1520_adc import HMCAD1520ADC
 from peripherals.trigger import Trigger
 
 
@@ -420,7 +419,9 @@ class Platform(Xilinx7SeriesPlatform):
 
     def do_finalize(self, fragment):
         Xilinx7SeriesPlatform.do_finalize(self, fragment)
-        self.add_period_constraint(self.lookup_request("adc_data:lclk_p", loose=True), 2e9/1000e6)
+        self.add_period_constraint(self.lookup_request("adc_data:lclk_p", loose=True), 1e9/500e6)
+        self.add_false_path_constraint(self.lookup_request("adc_data:lclk_p", loose=True), self.lookup_request("adc:clk", loose=True))
+        self.add_false_path_constraint(self.lookup_request("adc_data:lclk_p", loose=True), self.lookup_request("adc_frame:clk", loose=True))
 
 # CRG ----------------------------------------------------------------------------------------------
 
@@ -519,7 +520,7 @@ class BaseSoC(SoCMini):
         variant       ="dev",
         with_frontend = True,
         with_adc      = True,
-        with_jtagbone = False,
+        with_jtagbone = True,
         with_analyzer = False,
         **kwargs
     ):
@@ -540,6 +541,7 @@ class BaseSoC(SoCMini):
         SoCMini.__init__(self, platform, sys_clk_freq,
             ident         = f"LitePCIe SoC on ThunderScope {variant.upper()} ({version_string})",
             ident_version = True,
+            bus_interconnect = "crossbar",
         )
 
 
@@ -604,7 +606,7 @@ class BaseSoC(SoCMini):
             "Vendor_ID": "20A7",
             "Device_ID": "0101"
         })
-        self.add_pcie(phy=self.pcie_phy, ndmas=1, dma_buffering_depth=1024*16,
+        self.add_pcie(phy=self.pcie_phy, ndmas=1, dma_buffering_depth=400*16,
                       max_pending_requests=4, address_width=64)
 
 
@@ -831,19 +833,16 @@ class BaseSoC(SoCMini):
                     # Trigger.
                     self.submodules.trigger = Trigger()
 
-                    # HMCAD15XX.
-                    # self.submodules.hmcad1520 = HMCAD15XXADC(data_pads, sys_clk_freq, frame_polarity, lanes_polarity=data_polarity)
-                    self.submodules.hmcad1520 = HAD1511ADC(data_pads, sys_clk_freq, frame_polarity, lanes_polarity=data_polarity)
-                    self.submodules.conv = stream.Converter(64, data_width)
+                    # HMCAD1520.
+                    self.submodules.hmcad1520 = HMCAD1520ADC(data_pads, sys_clk_freq, frame_polarity, lanes_polarity=data_polarity)
 
                     # Gate.
-                    self.submodules.gate = stream.Gate([("data", 128)], sink_ready_when_disabled=True)
+                    self.submodules.gate = stream.Gate([("data", data_width)], sink_ready_when_disabled=True)
                     self.comb += self.gate.enable.eq(self.trigger.enable)
 
                     # Pipeline.
                     self.submodules += stream.Pipeline(
                         self.hmcad1520,
-                        self.conv,
                         self.gate,
                         self.source
                     )
@@ -872,16 +871,19 @@ class BaseSoC(SoCMini):
             )
 
             # ADC -> PCIe.
-            self.comb += self.adc.source.connect(self.pcie_dma0.sink)
+            self.sync += self.adc.source.connect(self.pcie_dma0.sink)
 
             # Analyzer -----------------------------------------------------------------------------
 
             if with_analyzer:
                 analyzer_signals = [
+                    self.adc.hmcad1520.bitslip,
+                    self.adc.hmcad1520.frame_valid,
+                    self.adc.hmcad1520.fclk
                 ]
                 self.submodules.analyzer = LiteScopeAnalyzer(analyzer_signals,
-                    depth        = 1024,
-                    clock_domain = "sys",
+                    depth        = 512,
+                    clock_domain = "adc_frame",
                     samplerate   = sys_clk_freq,
                     csr_csv      = "test/analyzer.csv"
                 )
