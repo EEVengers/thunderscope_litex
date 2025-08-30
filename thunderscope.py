@@ -381,7 +381,7 @@ class Platform(Xilinx7SeriesPlatform):
             "set_property BITSTREAM.CONFIG.CONFIGFALLBACK ENABLE [current_design]",
             "set_property BITSTREAM.GENERAL.COMPRESS TRUE [current_design]",
             f"set_property CFGBVS {self.device_list[variant]['cfgbvs']} [current_design]",
-            f"set_property CONFIG_VOLTAGE {self.device_list[variant]['config']} [current_design]",
+            f"set_property CONFIG_VOLTAGE {self.device_list[variant]['config']} [current_design]"
         ]
 
         if self.device_list[variant]["flash_size"] > 16 :
@@ -420,8 +420,9 @@ class Platform(Xilinx7SeriesPlatform):
     def do_finalize(self, fragment):
         Xilinx7SeriesPlatform.do_finalize(self, fragment)
         self.add_period_constraint(self.lookup_request("adc_data:lclk_p", loose=True), 1e9/500e6)
-        self.add_false_path_constraint(self.lookup_request("adc_data:lclk_p", loose=True), self.lookup_request("adc:clk", loose=True))
-        self.add_false_path_constraint(self.lookup_request("adc_data:lclk_p", loose=True), self.lookup_request("adc_frame:clk", loose=True))
+        self.add_period_constraint(self.lookup_request("adc_frame:clk", loose=True), 1e9/125e6)
+        self.add_false_path_constraint(self.lookup_request("adc_frame:clk", loose=True), self.lookup_request("sys:clk", loose=True))
+        
 
 # CRG ----------------------------------------------------------------------------------------------
 
@@ -431,23 +432,6 @@ class CRG(Module):
         self.rst = Signal()
         self.clock_domains.cd_sys    = ClockDomain()
         self.clock_domains.cd_idelay = ClockDomain()
-
-        # CFGM Clk ~65MHz.
-        # cfgm_clk      = Signal()
-        # cfgm_clk_freq = int(65e6)
-        # self.specials += Instance("STARTUPE2",
-        #     i_CLK       = 0,
-        #     i_GSR       = 0,
-        #     i_GTS       = 0,
-        #     i_KEYCLEARB = 1,
-        #     i_PACK      = 0,
-        #     i_USRCCLKO  = cfgm_clk,
-        #     i_USRCCLKTS = 0,
-        #     i_USRDONEO  = 1,
-        #     i_USRDONETS = 1,
-        #     o_CFGMCLK   = cfgm_clk
-        # )
-        # platform.add_period_constraint(cfgm_clk, 1e9/65e6)
 
         # PLL.
         self.submodules.pll = pll = S7PLL(speedgrade=-2)
@@ -466,24 +450,6 @@ class CRG(Module):
 
         # IDELAYCTRL.
         self.submodules.idelayctrl = S7IDELAYCTRL(self.cd_idelay)
-        # self.rst          = Signal()
-        # self.cd_sys       = ClockDomain()
-        # self.cd_sys4x     = ClockDomain()
-        # self.cd_sys4x_dqs = ClockDomain()
-        # self.cd_idelay    = ClockDomain()
-
-        # # # #
-
-        # self.pll = pll = S7PLL(speedgrade=-2)
-        # self.comb += pll.reset.eq(self.rst)
-        # pll.register_clkin(platform.request("clk50"), 50e6)
-        # pll.create_clkout(self.cd_sys,       sys_clk_freq)
-        # pll.create_clkout(self.cd_sys4x,     4*sys_clk_freq)
-        # pll.create_clkout(self.cd_sys4x_dqs, 4*sys_clk_freq, phase=90)
-        # pll.create_clkout(self.cd_idelay,    200e6)
-        # platform.add_false_path_constraints(self.cd_sys.clk, pll.clkin) # Ignore sys_clk to pll.clkin path created by SoC's rst.
-
-        # self.idelayctrl = S7IDELAYCTRL(self.cd_idelay)
 
 # BaseSoC -----------------------------------------------------------------------------------------
 
@@ -606,7 +572,7 @@ class BaseSoC(SoCMini):
             "Vendor_ID": "20A7",
             "Device_ID": "0101"
         })
-        self.add_pcie(phy=self.pcie_phy, ndmas=1, dma_buffering_depth=400*16,
+        self.add_pcie(phy=self.pcie_phy, ndmas=1, dma_buffering_depth=512*16,
                       max_pending_requests=4, address_width=64)
 
 

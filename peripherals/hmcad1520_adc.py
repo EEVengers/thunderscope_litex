@@ -12,6 +12,7 @@ from migen import *
 from migen.genlib.resetsync import AsyncResetSynchronizer
 
 from migen.genlib.misc import WaitTimer
+from migen.genlib.cdc import BusSynchronizer
 
 from litex.gen import *
 
@@ -91,13 +92,16 @@ class HMCAD1520ADC(LiteXModule):
         self._bitslip_count = CSRStatus(32, description="ADC bitslip count (with rollover).")
         self._sample_count  = CSRStatus(32, description="ADC samples count since last stat_rst.")
         self._data_channels = CSRStorage(fields=[
-            CSRField("shuffle",     offset=0, size=2, reset=0, description="Number of enabled channels to control shuffling of samples",
+            CSRField("shuffle",     offset=0, size=4, reset=0, description="Number of enabled channels to control shuffling of samples",
                     values=[
-                        (0, "Passthrough"),
-                        (1, "2-Channel Shuffling"),
-                        (2, "4-Channel Shuffling")
+                        (0, "1-Channel 8-bit Shuffling"),
+                        (1, "2-Channel 8-bit Shuffling"),
+                        (2, "4-Channel 8-bit Shuffling"),
+                        (3, "1-Channel 12-bit Shuffling"),
+                        (4, "2-Channel 12-bit Shuffling"),
+                        (5, "4-Channel 12-bit Shuffling")
                     ]),
-            CSRField("run_length",  offset=2, size=6, reset=1, description="Control Run-Length of samples for each channel ordered next to each other (Not Implemented)")            
+            CSRField("run_length",  offset=8, size=6, reset=1, description="Control Run-Length of samples for each channel ordered next to each other (Not Implemented)")            
         ])
         self._sample_bits = CSRStorage(fields=[
             CSRField("data_width",offset=0, size=2, reset=0, pulse=False, description="Select the ADC Sample data width.",
@@ -106,28 +110,6 @@ class HMCAD1520ADC(LiteXModule):
                         (0b01, "12-bit")
                     ])
         ])
-        # self._frame_debug = CSRStatus(fields=[
-        #     CSRField("frame_fsm_sync",          offset=0, size=1, description="Frame FSM in state SYNC"),
-        #     CSRField("frame_fsm_idle",          offset=1, size=1, description="Frame FSM in state IDLE"),
-        #     CSRField("frame_fsm_detect_0",      offset=2, size=1, description="Frame FSM in state DETECT0"),
-        #     CSRField("frame_fsm_detect_1",      offset=3, size=1, description="Frame FSM in state DETECT1"),
-        #     CSRField("frame_fsm_detect_2",      offset=4, size=1, description="Frame FSM in state DETECT2"),
-        #     CSRField("frame_valid",             offset=5, size=1, description="Frame Valid signal"),
-        #     CSRField("frame_sentinel",          offset=6, size=1, description="Frame Test signal")
-        # ])
-        # self._adc_debug = CSRStatus(fields=[
-        #     CSRField("gearbox_0_valid",     offset=0, size=1),
-        #     CSRField("gearbox_1_valid",     offset=1, size=1),
-        #     CSRField("gearbox_2_valid",     offset=2, size=1),
-        #     CSRField("gearbox_3_valid",     offset=3, size=1),
-        #     CSRField("gearbox_4_valid",     offset=4, size=1),
-        #     CSRField("gearbox_5_valid",     offset=5, size=1),
-        #     CSRField("gearbox_6_valid",     offset=6, size=1),
-        #     CSRField("gearbox_7_valid",     offset=7, size=1),
-        #     CSRField("cdc_sink_ready",      offset=8, size=1),
-        #     CSRField("shuffler_sink_ready", offset=9, size=1),
-        #     CSRField("adc_source_ready",    offset=10, size=1),
-        # ])
 
         # # #
 
@@ -166,9 +148,12 @@ class HMCAD1520ADC(LiteXModule):
             self.frame_valid   = frame_valid   = Signal(reset=0) # Indicates Data framed correctly
             self.fclk_check    = frame_check   = Signal(8)
             self.frame_sentinel = frame_sentinel = Signal(reset=0)
-            self.width_bits    = width_bits   = Signal(2)
+            self.width_bits = width_bits = Signal(2)
 
-            self.sync += [width_bits.eq(self._sample_bits.fields.data_width)]
+            self.width_synchro = BusSynchronizer(width=2, idomain="sys", odomain="adc_frame")
+            self.sync += [self.width_synchro.i.eq(self._sample_bits.fields.data_width)]
+
+            self.comb += width_bits.eq(self.width_synchro.o)
 
             # Receive & Deserialize Frame clock to use it as a delimiter for the data.
             self.specials += [
@@ -359,9 +344,6 @@ class HMCAD1520ADC(LiteXModule):
                     d12_gear.sink.data.eq(d if lanes_polarity[i] == 0 else (d ^ 0xff)),
                 ]
 
-                # gearbox_data = getattr(self._adc_debug.fields, f"gearbox_{i}_valid")
-                # self.comb += gearbox_data.eq(d8_gear.source.ready | d12_gear.source.ready)
-
                 gearbox_cases = {}
                 gearbox_cases[0] = [
                     d8_gear.sink.valid.eq(frame_valid),
@@ -390,9 +372,6 @@ class HMCAD1520ADC(LiteXModule):
                 self.sync += adc_data.eq(adc_data + nchannels)
                 self.sync += adc_source.data[8*i:8*(i+1)].eq(adc_data + i)
 
-        # self.adc_monitor0 = ClockDomainsRenamer("adc_frame")(stream.Monitor(self.adc_source, with_tokens=True, with_overflows=True, with_underflows=True, clock_domain="adc_frame"))
-        # self.adc_monitor0 = stream.Monitor(self.cdc.source, with_tokens=True, with_overflows=True, with_underflows=True)
-
         # Clock Domain Crossing.
         # ----------------------
 
@@ -400,8 +379,7 @@ class HMCAD1520ADC(LiteXModule):
             layout   = [("data", nchannels*16)],
             cd_from  = "adc_frame" if pads is not None else clock_domain,
             cd_to    = clock_domain,
-            buffered = True,
-            depth    = 32
+            buffered = True
         )
         # self.comb += self.adc_source.connect(self.cdc.sink)
         self.comb += [
@@ -416,24 +394,14 @@ class HMCAD1520ADC(LiteXModule):
         # Data from the HMCAD1520 comes in the order [1 1 2 2 3 3 4 4] for 4-channel operation
         #  and [1 1 1 1 2 2 2 2] for 2-channel operation.  Shuffle the data so the output data
         #  stream is [1 2 3 4 1 2 3 4] and [1 2 1 2 1 2 1 2] respectively.
-        self.adc_shuffler = ByteShuffler(3, byte_swap=[ [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
-                                                         [0, 1, 8, 9, 2, 3, 10, 11, 4, 5, 12, 13, 6, 7, 14, 15],
-                                                         [0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15]])
+        self.adc_shuffler = ByteShuffler(6, byte_swap=[ [0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5, 7, 9, 11, 13, 15],
+                                                        [0, 8, 2, 10, 4, 12, 6, 14, 1, 9, 3, 11, 5, 13, 7, 15],
+                                                        [0, 4, 8, 12, 2, 6, 10, 14, 1, 5, 9, 13, 3, 7, 11, 15],
+                                                        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+                                                        [0, 1, 8, 9, 2, 3, 10, 11, 4, 5, 12, 13, 6, 7, 14, 15],
+                                                        [0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15]
+                                                    ])
         self.comb += self.adc_shuffler.shuffle.eq(self._data_channels.fields.shuffle)
-
-
-        # self.comb += [
-        #     self.adc_shuffler.sink.connect(self.cdc.source),
-        #     self.source.valid.eq(self.adc_shuffler.source.valid),
-        #     self.source.data.eq(self.adc_shuffler.source.data),
-        #     self.adc_shuffler.source.ready.eq(1) # No backpressure allowed.
-        # ]
-
-        # self.comb += [
-        #     self._adc_debug.fields.cdc_sink_ready.eq(self.cdc.sink.ready),
-        #     self._adc_debug.fields.shuffler_sink_ready.eq(self.adc_shuffler.sink.ready),
-        #     self._adc_debug.fields.adc_source_ready.eq(self.source.ready)
-        # ]
 
         # DownSampling.
         # # -------------
@@ -474,8 +442,10 @@ class HMCAD1520ADC(LiteXModule):
 
         if pads is not None:
             # BitSlips Count.
-            bitslip_count = self._bitslip_count.status
-            self.sync.adc_frame += bitslip_count.eq(bitslip_count + self.bitslip)
+            self.bitslip_synchro = BusSynchronizer(width=32, idomain="adc_frame", odomain=clock_domain)
+            bitslip_count = self.bitslip_synchro.i
+            self.sync.adc_frame += self.bitslip_synchro.i.eq(bitslip_count + self.bitslip)
+            self.sync += self._bitslip_count.status.eq(self.bitslip_synchro.o)
 
         # Samples Count.
         sample_count = self._sample_count.status
@@ -483,7 +453,11 @@ class HMCAD1520ADC(LiteXModule):
             # On a valid cycle:
             If(source.valid,
                 If(sample_count != (2**32-nchannels),
-                    sample_count.eq(sample_count + nchannels)
+                   If(self._sample_bits.fields.data_width == 0b00, # 8-bit
+                        sample_count.eq(sample_count + (nchannels*2)),
+                    ).Else( # 12-bit
+                        sample_count.eq(sample_count + nchannels)
+                    )
                 )
             ),
             # Clear Count.
@@ -504,11 +478,11 @@ class HMCAD1520ADCDriver:
         self.n       = n
         self.mode    = mode
 
-        self.control       = getattr(bus.regs, f"adc_hmcad1511_control")
-        self.downsampling  = getattr(bus.regs, f"adc_hmcad1511_downsampling")
-        self.range         = getattr(bus.regs, f"adc_hmcad1511_range")
-        self.bitslip_count = getattr(bus.regs, f"adc_hmcad1511_bitslip_count")
-        self.sample_count  = getattr(bus.regs, f"adc_hmcad1511_sample_count")
+        self.control       = getattr(bus.regs, f"adc_hmcad1520_control")
+        self.downsampling  = getattr(bus.regs, f"adc_hmcad1520_downsampling")
+        self.range         = getattr(bus.regs, f"adc_hmcad1520_range")
+        self.bitslip_count = getattr(bus.regs, f"adc_hmcad1520_bitslip_count")
+        self.sample_count  = getattr(bus.regs, f"adc_hmcad1520_sample_count")
 
     def reset(self):
         # Reset ADC.
