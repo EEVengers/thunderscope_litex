@@ -12,7 +12,7 @@ from migen import *
 from migen.genlib.resetsync import AsyncResetSynchronizer
 
 from migen.genlib.misc import WaitTimer
-from migen.genlib.cdc import BusSynchronizer
+from migen.genlib.cdc import BusSynchronizer, PulseSynchronizer
 
 from litex.gen import *
 
@@ -79,7 +79,8 @@ class HMCAD1520ADC(LiteXModule):
             CSRField("frame_rst", offset=0, size=1, pulse=True, description="Frame clock reset."),
             CSRField("delay_rst", offset=1, size=1, pulse=True, description="Sampling delay reset."),
             CSRField("delay_inc", offset=2, size=1, pulse=True, description="Sampling delay increment."),
-            CSRField("stat_rst",  offset=3, size=1, pulse=True, description="Statistics reset.")
+            CSRField("stat_rst",  offset=3, size=1, pulse=True, description="Statistics reset."),
+            CSRField("data_delay_inc", offset=4, size=1, pulse=True, description="Sampling delay increment."),
         ])
         self._status       = CSRStatus() # Unused (for now).
         self._downsampling = CSRStorage(32, description="ADC Downsampling ratio.")
@@ -104,11 +105,25 @@ class HMCAD1520ADC(LiteXModule):
             CSRField("run_length",  offset=8, size=6, reset=1, description="Control Run-Length of samples for each channel ordered next to each other (Not Implemented)")            
         ])
         self._sample_bits = CSRStorage(fields=[
-            CSRField("data_width",offset=0, size=2, reset=0, pulse=False, description="Select the ADC Sample data width.",
+            CSRField("data_width",offset=0, size=2, reset=0, description="Select the ADC Sample data width.",
                     values=[
                         (0b00, "8-bit"),
                         (0b01, "12-bit")
                     ])
+        ])
+        self._frame_debug = CSRStatus(fields=[
+            CSRField("frame_clk",          offset=0, size=8, description="Frame Alignment Clock Pattern"),
+            CSRField("frame_valid",             offset=8, size=1, description="Frame Valid signal")
+        ])
+        self._adc_debug = CSRStatus(fields=[
+            CSRField("gearbox_0_valid",     offset=0, size=1),
+            CSRField("gearbox_1_valid",     offset=1, size=1),
+            CSRField("gearbox_2_valid",     offset=2, size=1),
+            CSRField("gearbox_3_valid",     offset=3, size=1),
+            CSRField("gearbox_4_valid",     offset=4, size=1),
+            CSRField("gearbox_5_valid",     offset=5, size=1),
+            CSRField("gearbox_6_valid",     offset=6, size=1),
+            CSRField("gearbox_7_valid",     offset=7, size=1)
         ])
 
         # # #
@@ -141,18 +156,15 @@ class HMCAD1520ADC(LiteXModule):
         # ---------------------------------
 
         if pads is not None:
-            self.bitslip       = bitslip       = Signal()
-            self.fclk          = fclk          = Signal(8)
-            self.fclk_no_delay = fclk_no_delay = Signal()
-            self.fclk_delayed  = fclk_delayed  = Signal()
-            self.frame_valid   = frame_valid   = Signal(reset=0) # Indicates Data framed correctly
-            self.fclk_check    = frame_check   = Signal(8)
-            self.frame_sentinel = frame_sentinel = Signal(reset=0)
-            self.width_bits = width_bits = Signal(2)
+            self.bitslip        =  bitslip      = Signal()
+            self.fclk           = fclk          = Signal(8)
+            self.fclk_no_delay  = fclk_no_delay = Signal()
+            self.fclk_delayed   = fclk_delayed  = Signal()
+            self.frame_valid    = frame_valid   = Signal(reset=0) # Indicates Data framed correctly
+            self.width_bits     = width_bits    = Signal(2)
 
             self.width_synchro = BusSynchronizer(width=2, idomain="sys", odomain="adc_frame")
-            self.sync += [self.width_synchro.i.eq(self._sample_bits.fields.data_width)]
-
+            self.sync += self.width_synchro.i.eq(self._sample_bits.fields.data_width)
             self.comb += width_bits.eq(self.width_synchro.o)
 
             # Receive & Deserialize Frame clock to use it as a delimiter for the data.
@@ -200,25 +212,25 @@ class HMCAD1520ADC(LiteXModule):
             ]
 
             # Check Frame clock synchronization and increment bitslip every 1 ms when not synchronized.
-            fclk_timer = WaitTimer(int(1e-3*sys_clk_freq))
+            fclk_timer = WaitTimer(int(1e-3*125e6))
             fclk_timer = ClockDomainsRenamer("adc_frame")(fclk_timer)
             self.submodules += fclk_timer
-            if(frame_polarity == 1):
-                frame_valid_8 = [0xf0]
+            
+            if(frame_polarity):
+                frame_valid_8 = 0xf0
                 frame_valid_12 = [0xc0, 0x0f, 0xfc]
             else:
-                frame_valid_8 = [0x0f]
+                frame_valid_8 = 0x0f
                 frame_valid_12 = [0x3f, 0xf0, 0x03]
 
             self.sync.adc_frame += [
                 bitslip.eq(0),
-                frame_sentinel.eq(1),
                 fclk_timer.wait.eq(~fclk_timer.done),
                 If(fclk_timer.done,
-                    If((width_bits == 0b0) & (fclk != frame_valid_8[0]),
+                    If((width_bits == 0b0) & (fclk != frame_valid_8),
                         bitslip.eq(1)
-                    ).Elif((width_bits == 0b1) & (fclk != frame_valid_12[0])
-                           & (fclk != frame_valid_12[1]) & (fclk != frame_valid_12[2]),
+                    ).Elif((width_bits == 0b1) & ((fclk != frame_valid_12[0])
+                            & (fclk != frame_valid_12[1]) & (fclk != frame_valid_12[2])),
                         bitslip.eq(1)
                     )
                 )
@@ -235,15 +247,13 @@ class HMCAD1520ADC(LiteXModule):
             frame_fsm.act("DETECT0",
                 # Start of Frame detected.
                 NextValue(frame_valid, 0),
+                NextState("DETECT0"),
                 # Wait for the next frame clock to be valid.
-                If((width_bits == 0b0) & (fclk == frame_valid_8[0]),
+                If((width_bits == 0b0) & (fclk == frame_valid_8),
                     NextValue(frame_valid, 1),
                     NextState("SYNC")
                 ).Elif((width_bits == 0b1) & (fclk == frame_valid_12[0]),
                     NextState("DETECT1")
-                ).Else(
-                    # If the next frame clock is not valid, wait for the next one.
-                    NextState("DETECT0")
                 )
             )
             frame_fsm.act("DETECT1",
@@ -270,17 +280,40 @@ class HMCAD1520ADC(LiteXModule):
                 )
             )
             frame_fsm.act("SYNC",
-                If(bitslip == 1,
+                If(bitslip,
                     NextValue(frame_valid, 0),
-                    NextState("IDLE"),
+                    NextState("DETECT0")
+                ).Elif((width_bits == 0b0) & (fclk != frame_valid_8),
+                    NextValue(frame_valid, 0),
+                    NextState("DETECT0")
+                ).Elif((width_bits == 0b1) & ((fclk != frame_valid_12[0])
+                        & (fclk != frame_valid_12[1]) & (fclk != frame_valid_12[2])),
+                    NextValue(frame_valid, 0),
+                    NextState("DETECT0")
                 ).Else(
                     NextValue(frame_valid, 1),
                     NextState("SYNC")
                 )
             )
             
+            adc_valid_synchro = BusSynchronizer(width=9, idomain="adc_frame", odomain=clock_domain)
+            self.sync.adc_frame += [
+                adc_valid_synchro.i[0:8].eq(fclk),
+                adc_valid_synchro.i[8].eq(frame_valid)
+            ]
+            self.submodules += adc_valid_synchro
+
+            self.comb += [
+                self._frame_debug.fields.frame_clk.eq(adc_valid_synchro.o[0:8]),
+                self._frame_debug.fields.frame_valid.eq(adc_valid_synchro.o[8])
+            ]
+
             # Receive & Deserialize Data.
             self.adc_source = adc_source = stream.Endpoint([("data", nchannels*16)])
+
+            stat_rst = PulseSynchronizer(idomain="sys", odomain="adc_frame")
+            self.comb += stat_rst.i.eq(self._control.fields.stat_rst)
+
 
             for i in range(nchannels):
                 d_no_delay = Signal()
@@ -305,7 +338,7 @@ class HMCAD1520ADC(LiteXModule):
 
                         i_C        = ClockSignal("sys"),
                         i_LD       = self._control.fields.delay_rst,
-                        i_CE       = self._control.fields.delay_inc,
+                        i_CE       = self._control.fields.data_delay_inc,
                         i_LDPIPEEN = 0,
                         i_INC      = 1,
 
@@ -329,12 +362,14 @@ class HMCAD1520ADC(LiteXModule):
                          **{f"o_Q{n+1}": d[8-1-n] for n in range(8)},
                     )
                 ]
-                
+
                 # If 8-bit mode, pack 2 samples into 16 bits.
                 d8_gear = stream.Gearbox(i_dw=8, o_dw=16, msb_first=False)
                 d8_gear = ClockDomainsRenamer("adc_frame")(d8_gear)
+
                 d12_gear = stream.Gearbox(i_dw=8, o_dw=12, msb_first=False)
                 d12_gear = ClockDomainsRenamer("adc_frame")(d12_gear)
+                d12_gear = ResetInserter()(d12_gear)
 
                 self.submodules += d8_gear
                 self.submodules += d12_gear
@@ -342,51 +377,44 @@ class HMCAD1520ADC(LiteXModule):
                 self.comb += [
                     d8_gear.sink.data.eq(d if lanes_polarity[i] == 0 else (d ^ 0xff)),
                     d12_gear.sink.data.eq(d if lanes_polarity[i] == 0 else (d ^ 0xff)),
+                    d12_gear.reset.eq(~frame_valid),
+                    d8_gear.source.ready.eq(1),
+                    d12_gear.source.ready.eq(1),
+                    d8_gear.sink.valid.eq(frame_valid),
+                    d12_gear.sink.valid.eq(frame_valid)
                 ]
+
+                gearbox_v = BusSynchronizer(width=1, idomain="adc_frame", odomain=clock_domain)
+                self.comb += gearbox_v.i.eq(d12_gear.source.valid)
+                self.comb += self._adc_debug.fields.__getattribute__(f"gearbox_{i}_valid").eq(gearbox_v.o)
 
                 gearbox_cases = {}
                 gearbox_cases[0] = [
-                    d8_gear.sink.valid.eq(frame_valid),
                     adc_source.data[16*i:16*(i+1)].eq(d8_gear.source.data),
                     adc_source.valid.eq(d8_gear.source.valid),
-                    d8_gear.source.ready.eq(adc_source.ready)
                 ]
                 gearbox_cases[1] = [
-                    d12_gear.sink.valid.eq(frame_valid),
-                    adc_source.data[16*i:((16*i)+12)].eq(d12_gear.source.data),
+                    # adc_source.data[16*i:((16*i)+12)].eq(d12_gear.source.data),
+                    adc_source.data[((16*i)+4):(16*(i+1))].eq(d12_gear.source.data),
                     # Sign-extend the 12-bit data to 16 bits.
-                    {adc_source.data[(16*i)+12+j].eq(d12_gear.source.data[11]) for j in range(4)},
+                    # {adc_source.data[(16*i)+12+j].eq(d12_gear.source.data[11]) for j in range(4)},
+                    {adc_source.data[(16*i)+j].eq(0) for j in range(4)},
                     adc_source.valid.eq(d12_gear.source.valid),
-                    d12_gear.source.ready.eq(adc_source.ready)
                 ]
 
-                self.comb += Case(width_bits, gearbox_cases)
+                self.sync.adc_frame += Case(width_bits, gearbox_cases)
 
-
-        if pads is None:
-            self.adc_source = adc_source = stream.Endpoint([("data", nchannels*16)])
-            self.comb += adc_source.valid.eq(1)
-            # Generate a Ramp Pattern when no pads are provided.
-            for i in range(nchannels):
-                adc_data = Signal(8)
-                self.sync += adc_data.eq(adc_data + nchannels)
-                self.sync += adc_source.data[8*i:8*(i+1)].eq(adc_data + i)
 
         # Clock Domain Crossing.
         # ----------------------
 
         self.cdc = stream.ClockDomainCrossing(
             layout   = [("data", nchannels*16)],
-            cd_from  = "adc_frame" if pads is not None else clock_domain,
+            cd_from  = "adc_frame",
             cd_to    = clock_domain,
-            buffered = True
+            buffered = True,
+            depth=8
         )
-        # self.comb += self.adc_source.connect(self.cdc.sink)
-        self.comb += [
-            self.cdc.sink.valid.eq(self.adc_source.valid),
-            self.cdc.sink.data.eq(self.adc_source.data),
-            adc_source.ready.eq(1) # No backpressure allowed.
-        ]
 
         # Shuffler.
         # ---------
@@ -408,6 +436,7 @@ class HMCAD1520ADC(LiteXModule):
         # self.submodules.downsampling = DownSampling(ratio=self._downsampling.storage)
 
         self.submodules += stream.Pipeline(
+                                    self.adc_source,
                                     self.cdc,
                                     self.adc_shuffler,
                                     self.source
@@ -442,10 +471,10 @@ class HMCAD1520ADC(LiteXModule):
 
         if pads is not None:
             # BitSlips Count.
-            self.bitslip_synchro = BusSynchronizer(width=32, idomain="adc_frame", odomain=clock_domain)
-            bitslip_count = self.bitslip_synchro.i
-            self.sync.adc_frame += self.bitslip_synchro.i.eq(bitslip_count + self.bitslip)
-            self.sync += self._bitslip_count.status.eq(self.bitslip_synchro.o)
+            self.bitslip_synchro = PulseSynchronizer(idomain="adc_frame", odomain=clock_domain)
+            self.sync.adc_frame += self.bitslip_synchro.i.eq(self.bitslip)
+            bitslip_count = self._bitslip_count.status
+            self.sync += self._bitslip_count.status.eq(bitslip_count + self.bitslip_synchro.o)
 
         # Samples Count.
         sample_count = self._sample_count.status
@@ -466,130 +495,3 @@ class HMCAD1520ADC(LiteXModule):
             ),
         ]
 
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
-#                                  S O F T W A R E                                                 #
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
-
-class HMCAD1520ADCDriver:
-    def __init__(self, bus, spi, n, mode="single"):
-        assert mode in ["single", "dual"]
-        self.bus     = bus
-        self.spi     = spi
-        self.n       = n
-        self.mode    = mode
-
-        self.control       = getattr(bus.regs, f"adc_hmcad1520_control")
-        self.downsampling  = getattr(bus.regs, f"adc_hmcad1520_downsampling")
-        self.range         = getattr(bus.regs, f"adc_hmcad1520_range")
-        self.bitslip_count = getattr(bus.regs, f"adc_hmcad1520_bitslip_count")
-        self.sample_count  = getattr(bus.regs, f"adc_hmcad1520_sample_count")
-
-    def reset(self):
-        # Reset ADC.
-        self.set_reg(0x00, 0x0001) # Soft Reset.
-        time.sleep(0.1)
-        self.set_reg(0x0f, 0x2000) # Power-Down.
-        time.sleep(0.1)
-        self.set_reg(0x0f, 0x0000) # Power-On.
-
-        # Reset Core.
-        self.control.write(HMCAD1511_CORE_CONTROL_FRAME_RST)
-
-    def set_reg(self, reg, value):
-        print(f"hmcad 0x{reg:02X} 0x{value:04X}")
-        self.spi.write(0, [reg, (value >> 8) & 0xff, value & 0xff])
-
-    def set_gain(self, gain):
-        if self.mode == "single":
-            self.set_reg(0x2b, (gain << 8))
-        if self.mode == "dual":
-            self.set_reg(0x2b, (gain << 4) | (gain << 0)) # Note: Apply similar gains on the two channels.
-
-    def set_clk_divider(self, divider=1):
-        self.set_reg()
-
-    def data_mode(self, n):
-        mode = "dual"
-        if isinstance(n, int):
-            n = [n, n]
-            mode = "single"
-        if isinstance(n, list) and (len(n) == 1):
-            n = n + n
-            mode = "single"
-        assert len(n) == 2
-        reg31 = {
-            "single": 0x0001, # Single Channel ADC0..3 Interleaving / X1 Divider.
-            "dual"  : 0x0102, # Dual Channel ADC0..1/ADC2..3 Interleaving / X2 Divider.
-        }[mode]
-        self.set_reg(0x0f, 0x0200) # Power-Down.
-        self.set_reg(0x31,  reg31) # Apply Mode.
-        self.set_reg(0x0f, 0x0000) # Power-Up.
-
-        self.set_reg(0x25, 0x0000) # Disable Patterns.
-
-        self.set_reg(0x30, 0x0008) # Clk Jitter Adjustement.
-        inp_sel_adc01 = (1 << ((n[0]%2)*3 + 1))
-        inp_sel_adc23 = (1 << ((n[1]%2)*3 + 1))
-        self.set_reg(0x3a, (inp_sel_adc01 << 8) | inp_sel_adc01) # Connect Input to ADC0/1.
-        self.set_reg(0x3b, (inp_sel_adc23 << 8) | inp_sel_adc23) # Connect Input to ADC2/3.
-        self.set_reg(0x33, 0x0001) # Coarse Gain in X mode.
-        self.set_reg(0x2a, 0x2222) # X2 Gain on all ADCs.
-
-    def enable_ramp_pattern(self):
-        self.set_reg(0x25, 0x0040) # Enable Full-Scale Ramp.
-
-    def enable_single_pattern(self, pattern):
-        self.set_reg(0x26, pattern) # Set Pattern.
-        self.set_reg(0x25, 0x0010)  # Enable Single Pattern.
-
-    def enable_dual_pattern(self, patterns):
-        assert len(patterns) == 2
-        self.set_reg(0x26, patterns[0]) # Set First Pattern.
-        self.set_reg(0x27, patterns[1]) # Programm Second Pattern.
-        self.set_reg(0x25, 0x0020)      # Enable Dual Pattern.
-
-    def enable_deskew_pattern(self):
-        self.set_reg(0x25, 0x0000) # Disable Patterns.
-        self.set_reg(0x45, 0x0002) # Enable Deskew Pattern.
-
-    def enable_sync_pattern(self):
-        self.set_reg(0x25, 0x0000) # Disable Patterns.
-        self.set_reg(0x45, 0x0001) # Enable Deskew Pattern.
-
-    def get_range(self, n, duration=0.5):
-        self.control.write(HMCAD1511_CORE_CONTROL_STAT_RST)
-        time.sleep(duration)
-        adc_range = self.range.read()
-        adc_min = (adc_range >> ((n%2)*16 + 0)) & 0xff
-        adc_max = (adc_range >> ((n%2)*16 + 8)) & 0xff
-        return adc_min, adc_max
-
-    def get_samplerate(self, duration=0.5):
-        self.control.write(HMCAD1511_CORE_CONTROL_STAT_RST)
-        time.sleep(duration)
-        sample_count = self.sample_count.read()
-        return sample_count/duration
-
-class HMCAD1511DMADriver:
-    def __init__(self, bus, n):
-        self.bus     = bus
-        self.n       = n
-
-        self.dma_enable = getattr(bus.regs, f"adc{n}_dma_enable")
-        self.dma_base   = getattr(bus.regs, f"adc{n}_dma_base")
-        self.dma_length = getattr(bus.regs, f"adc{n}_dma_length")
-        self.dma_done   = getattr(bus.regs, f"adc{n}_dma_done")
-
-    def reset(self):
-        self.dma_enable.write(0)
-
-
-    def start(self, base, length):
-        self.dma_enable.write(0)
-        self.dma_base.write(base)
-        self.dma_length.write(length + 1024) # FIXME: +1024.
-        self.dma_enable.write(1)
-
-    def wait(self):
-        while not (self.dma_done.read() & 0x1):
-            pass

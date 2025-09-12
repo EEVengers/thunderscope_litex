@@ -340,7 +340,7 @@ a7_thunderscope_rev5 = [
         # Lanes polarity:                   X                      # (X=Inverted).
         Subsignal("d_p", Pins(" B9 B10 D11 C11 A13 B14 D13 C14")), # Data.
         Subsignal("d_n", Pins(" A9 A10 C12 B11 A14 A15 C13 B15")),
-        IOStandard("LVDS_25"),
+        IOStandard("RSDS_25"),
         Misc("DIFF_TERM=TRUE"),
     ),
 
@@ -420,8 +420,7 @@ class Platform(Xilinx7SeriesPlatform):
     def do_finalize(self, fragment):
         Xilinx7SeriesPlatform.do_finalize(self, fragment)
         self.add_period_constraint(self.lookup_request("adc_data:lclk_p", loose=True), 1e9/500e6)
-        self.add_period_constraint(self.lookup_request("adc_frame:clk", loose=True), 1e9/125e6)
-        self.add_false_path_constraint(self.lookup_request("adc_frame:clk", loose=True), self.lookup_request("sys:clk", loose=True))
+        self.add_false_path_constraint(self.lookup_request("adc_data:lclk_p", loose=True), self.lookup_request("sys:clk", loose=True))
         
 
 # CRG ----------------------------------------------------------------------------------------------
@@ -482,7 +481,7 @@ class BaseSoC(SoCMini):
         "spiflash": 0x1000_0000
     }
 
-    def __init__(self, sys_clk_freq=int(150e6),
+    def __init__(self, sys_clk_freq=int(125e6),
         variant       ="dev",
         with_frontend = True,
         with_adc      = True,
@@ -800,7 +799,11 @@ class BaseSoC(SoCMini):
                     self.submodules.trigger = Trigger()
 
                     # HMCAD1520.
-                    self.submodules.hmcad1520 = HMCAD1520ADC(data_pads, sys_clk_freq, frame_polarity, lanes_polarity=data_polarity)
+                    self.submodules.hmcad1520 = HMCAD1520ADC(pads=data_pads,
+                                                             sys_clk_freq=sys_clk_freq,
+                                                             frame_polarity=frame_polarity,
+                                                             lanes_polarity=data_polarity,
+                                                             clock_domain="sys")
 
                     # Gate.
                     self.submodules.gate = stream.Gate([("data", data_width)], sink_ready_when_disabled=True)
@@ -839,20 +842,20 @@ class BaseSoC(SoCMini):
             # ADC -> PCIe.
             self.sync += self.adc.source.connect(self.pcie_dma0.sink)
 
-            # Analyzer -----------------------------------------------------------------------------
+        # Analyzer -----------------------------------------------------------------------------
 
-            if with_analyzer:
-                analyzer_signals = [
-                    self.adc.hmcad1520.bitslip,
-                    self.adc.hmcad1520.frame_valid,
-                    self.adc.hmcad1520.fclk
-                ]
-                self.submodules.analyzer = LiteScopeAnalyzer(analyzer_signals,
-                    depth        = 512,
-                    clock_domain = "adc_frame",
-                    samplerate   = sys_clk_freq,
-                    csr_csv      = "test/analyzer.csv"
-                )
+        if with_analyzer:
+            analyzer_signals = [
+                self.adc.hmcad1520.bitslip,
+                self.adc.hmcad1520.frame_valid,
+                self.adc.hmcad1520.fclk
+            ]
+            self.submodules.analyzer = LiteScopeAnalyzer(analyzer_signals,
+                depth        = 512,
+                clock_domain = "adc_frame",
+                samplerate   = sys_clk_freq,
+                csr_csv      = "test/analyzer.csv"
+            )
 
 # Build --------------------------------------------------------------------------------------------
 
