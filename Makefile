@@ -83,7 +83,7 @@ $(ALL_VARIANTS) : $(SOURCES) venv
 .PHONY: gen $(GEN_VARIANTS)
 gen: $(GEN_VARIANTS) venv
 
-$(GEN_VARIANTS): gen-% : $(SOURCES)
+$(GEN_VARIANTS): gen-% : $(SOURCES) venv
 	$(VENV_ACTIVATE) && \
 	$(PY) $(PROJECT).py --variant=$* --output-dir=$(BUILD_PATH)/$(PROJECT)_$*
 
