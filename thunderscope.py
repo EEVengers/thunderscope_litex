@@ -139,7 +139,7 @@ a7_484_io = [
         # Lanes polarity:       X   X       X   X   X   X   X      # (X=Inverted).
         Subsignal("d_p", Pins("A15 B15 B17 A13 F16 D14 E13 F13")), # Data.
         Subsignal("d_n", Pins("A16 B16 B18 A14 E17 D15 E14 F14")),
-        IOStandard("LVDS_25"),
+        IOStandard("RSDS_25"),
         Misc("DIFF_TERM=TRUE"),
     ),
 
@@ -227,7 +227,7 @@ a7_325_io = [
         # Lanes polarity:               X   X       X   X   X      # (X=Inverted).
         Subsignal("d_p", Pins("U4  V3  U7  V8  R5  T4  U6  R7")),  # Data.
         Subsignal("d_n", Pins("V4  V2  V6  V7  T5  T3  U5  T7")),
-        IOStandard("LVDS_25"),
+        IOStandard("RSDS_25"),
         Misc("DIFF_TERM=FALSE"),
     ),
 
@@ -439,8 +439,10 @@ class CRG(Module):
         clk = platform.request("clk50", loose = True)
         if clk is not None:
             pll.register_clkin(clk, 50e6)
+            platform.add_period_constraint(pll.clkin, 1e9/50e6)
         else:
             pll.register_clkin(platform.request("clk25"), 25e6)
+            platform.add_period_constraint(pll.clkin, 1e9/25e6)
         pll.create_clkout(self.cd_sys, sys_clk_freq, reset_buf="bufg")
         pll.create_clkout(self.cd_idelay, 200e6)
         platform.add_false_path_constraints(self.cd_sys.clk, pll.clkin) # Ignore sys_clk to pll.clkin path created by SoC's rst.
@@ -481,7 +483,7 @@ class BaseSoC(SoCMini):
         "spiflash": 0x1000_0000
     }
 
-    def __init__(self, sys_clk_freq=int(125e6),
+    def __init__(self, sys_clk_freq=int(150e6),
         variant       ="dev",
         with_frontend = True,
         with_adc      = True,

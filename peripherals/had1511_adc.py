@@ -187,10 +187,10 @@ class HAD1511ADC(LiteXModule):
                 fclk_timer.wait.eq(~fclk_timer.done),
                 If(fclk_timer.done,
                     If(frame_polarity,
-                        If((fclk != 0xf0) & (fclk != 0xCC) & (fclk != 0xAA),
+                        If((fclk != 0xf0),
                             bitslip.eq(1)
                         )
-                    ).Elif((fclk != 0xf) & (fclk != 0x33) & (fclk != 0x55),
+                    ).Elif((fclk != 0xf),
                             bitslip.eq(1)
                     )
                 )

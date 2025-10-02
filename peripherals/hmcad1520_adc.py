@@ -59,7 +59,47 @@ HMCAD1511_ADC_GAIN_9DB = 9
 
 hmcad1520_phy_layout = ["fclk_p", "fclk_n", "lclk_p", "lclk_n", "d_p", "d_n"]
 
-# HMCAD1520 ADC --------------------------------------------------------------------------------------
+# SERDES Secondary Gearbox--------------------------------------------------------------------------
+
+class EightTwelve(LiteXModule):
+    def __init__(self):
+        self.sink_valid = sink_valid    = Signal()
+        self.sink       = sink          = Signal(8)
+        self.source     = source        = stream.Endpoint([("data", 12)])
+
+        # # #
+        # Control path
+
+        step = Signal(max=3)
+
+        self.comb += [
+            If(step != 1, source.valid.eq(sink_valid))
+            .Else(source.valid.eq(0))
+        ]
+
+        self.sync += [
+            If(sink_valid, [step.eq(step + 1), If(step == 2, step.eq(0))])
+            .Else(step.eq(0))
+        ]
+
+        # Data path
+
+        shift_register = Signal(24, reset_less=True)
+
+        i_cases = {}
+        for i in range(3):
+            i_cases[i] = shift_register[8*(i):8*(i+1)].eq(sink)
+        self.sync += If(sink_valid, Case(step, i_cases)).Else(shift_register.eq(0))
+
+        o_cases = {}
+        o_cases[1] = source.data.eq(0)
+        o_cases[2] = source.data.eq(shift_register[0:12])
+        o_cases[0] = source.data.eq(shift_register[12:24])
+
+        self.comb += Case(step, o_cases)
+
+
+# HMCAD1520 ADC ------------------------------------------------------------------------------------
 
 class HMCAD1520ADC(LiteXModule):
     def __init__(self, pads, sys_clk_freq, frame_polarity=0, lanes_polarity=[0]*8, clock_domain="sys"):
@@ -80,7 +120,6 @@ class HMCAD1520ADC(LiteXModule):
             CSRField("delay_rst", offset=1, size=1, pulse=True, description="Sampling delay reset."),
             CSRField("delay_inc", offset=2, size=1, pulse=True, description="Sampling delay increment."),
             CSRField("stat_rst",  offset=3, size=1, pulse=True, description="Statistics reset."),
-            CSRField("data_delay_inc", offset=4, size=1, pulse=True, description="Sampling delay increment."),
         ])
         self._status       = CSRStatus() # Unused (for now).
         self._downsampling = CSRStorage(32, description="ADC Downsampling ratio.")
@@ -114,16 +153,6 @@ class HMCAD1520ADC(LiteXModule):
         self._frame_debug = CSRStatus(fields=[
             CSRField("frame_clk",          offset=0, size=8, description="Frame Alignment Clock Pattern"),
             CSRField("frame_valid",             offset=8, size=1, description="Frame Valid signal")
-        ])
-        self._adc_debug = CSRStatus(fields=[
-            CSRField("gearbox_0_valid",     offset=0, size=1),
-            CSRField("gearbox_1_valid",     offset=1, size=1),
-            CSRField("gearbox_2_valid",     offset=2, size=1),
-            CSRField("gearbox_3_valid",     offset=3, size=1),
-            CSRField("gearbox_4_valid",     offset=4, size=1),
-            CSRField("gearbox_5_valid",     offset=5, size=1),
-            CSRField("gearbox_6_valid",     offset=6, size=1),
-            CSRField("gearbox_7_valid",     offset=7, size=1)
         ])
 
         # # #
@@ -182,7 +211,7 @@ class HMCAD1520ADC(LiteXModule):
                     p_REFCLK_FREQUENCY      = 200.0,
                     p_PIPE_SEL              = "FALSE",
                     p_IDELAY_TYPE           = "VARIABLE",
-                    p_IDELAY_VALUE          = 0,
+                    p_IDELAY_VALUE          = 6,
 
                     i_C        = ClockSignal("sys"),
                     i_LD       = self._control.fields.delay_rst,
@@ -334,11 +363,11 @@ class HMCAD1520ADC(LiteXModule):
                         p_REFCLK_FREQUENCY      = 200.0,
                         p_PIPE_SEL              = "FALSE",
                         p_IDELAY_TYPE           = "VARIABLE",
-                        p_IDELAY_VALUE          = 0,
+                        p_IDELAY_VALUE          = 6,
 
                         i_C        = ClockSignal("sys"),
                         i_LD       = self._control.fields.delay_rst,
-                        i_CE       = self._control.fields.data_delay_inc,
+                        i_CE       = self._control.fields.delay_inc,
                         i_LDPIPEEN = 0,
                         i_INC      = 1,
 
@@ -366,43 +395,37 @@ class HMCAD1520ADC(LiteXModule):
                 # If 8-bit mode, pack 2 samples into 16 bits.
                 d8_gear = stream.Gearbox(i_dw=8, o_dw=16, msb_first=False)
                 d8_gear = ClockDomainsRenamer("adc_frame")(d8_gear)
+                d8_gear = ResetInserter()(d8_gear)
 
-                d12_gear = stream.Gearbox(i_dw=8, o_dw=12, msb_first=False)
+                d12_gear = EightTwelve()
                 d12_gear = ClockDomainsRenamer("adc_frame")(d12_gear)
-                d12_gear = ResetInserter()(d12_gear)
 
                 self.submodules += d8_gear
                 self.submodules += d12_gear
 
                 self.comb += [
-                    d8_gear.sink.data.eq(d if lanes_polarity[i] == 0 else (d ^ 0xff)),
-                    d12_gear.sink.data.eq(d if lanes_polarity[i] == 0 else (d ^ 0xff)),
-                    d12_gear.reset.eq(~frame_valid),
+                    d8_gear.sink.data.eq(d if lanes_polarity[i] == 0 else (~d)),
+                    d12_gear.sink.eq(d if lanes_polarity[i] == 0 else (~d)),
                     d8_gear.source.ready.eq(1),
-                    d12_gear.source.ready.eq(1),
-                    d8_gear.sink.valid.eq(frame_valid),
-                    d12_gear.sink.valid.eq(frame_valid)
+                    d8_gear.sink.valid.eq(1),
+                    d12_gear.sink_valid.eq(frame_valid)
                 ]
-
-                gearbox_v = BusSynchronizer(width=1, idomain="adc_frame", odomain=clock_domain)
-                self.comb += gearbox_v.i.eq(d12_gear.source.valid)
-                self.comb += self._adc_debug.fields.__getattribute__(f"gearbox_{i}_valid").eq(gearbox_v.o)
 
                 gearbox_cases = {}
                 gearbox_cases[0] = [
-                    adc_source.data[16*i:16*(i+1)].eq(d8_gear.source.data),
+                    adc_source.data[16*i:16*(i+1)].eq(d8_gear.source.data[0:16]),
                     adc_source.valid.eq(d8_gear.source.valid),
                 ]
                 gearbox_cases[1] = [
-                    # adc_source.data[16*i:((16*i)+12)].eq(d12_gear.source.data),
                     adc_source.data[((16*i)+4):(16*(i+1))].eq(d12_gear.source.data),
-                    # Sign-extend the 12-bit data to 16 bits.
-                    # {adc_source.data[(16*i)+12+j].eq(d12_gear.source.data[11]) for j in range(4)},
                     {adc_source.data[(16*i)+j].eq(0) for j in range(4)},
                     adc_source.valid.eq(d12_gear.source.valid),
                 ]
 
-                self.sync.adc_frame += Case(width_bits, gearbox_cases)
+                self.sync.adc_frame += [
+                    Case(width_bits, gearbox_cases),   
+                    d8_gear.reset.eq(~frame_valid)
+                ]
 
 
         # Clock Domain Crossing.
@@ -422,12 +445,12 @@ class HMCAD1520ADC(LiteXModule):
         # Data from the HMCAD1520 comes in the order [1 1 2 2 3 3 4 4] for 4-channel operation
         #  and [1 1 1 1 2 2 2 2] for 2-channel operation.  Shuffle the data so the output data
         #  stream is [1 2 3 4 1 2 3 4] and [1 2 1 2 1 2 1 2] respectively.
-        self.adc_shuffler = ByteShuffler(6, byte_swap=[ [0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5, 7, 9, 11, 13, 15],
-                                                        [0, 8, 2, 10, 4, 12, 6, 14, 1, 9, 3, 11, 5, 13, 7, 15],
-                                                        [0, 4, 8, 12, 2, 6, 10, 14, 1, 5, 9, 13, 3, 7, 11, 15],
-                                                        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
-                                                        [0, 1, 8, 9, 2, 3, 10, 11, 4, 5, 12, 13, 6, 7, 14, 15],
-                                                        [0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15]
+        self.adc_shuffler = ByteShuffler(6, byte_swap=[ [0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5, 7, 9, 11, 13, 15], # 8-Bit, Single Channel
+                                                        [0, 8, 2, 10, 4, 12, 6, 14, 1, 9, 3, 11, 5, 13, 7, 15], # 8-Bit, Dual Channel
+                                                        [0, 4, 8, 12, 2, 6, 10, 14, 1, 5, 9, 13, 3, 7, 11, 15], # 8-Bit, Quad Channel
+                                                        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], # 12-Bit, Single Channel
+                                                        [0, 1, 8, 9, 2, 3, 10, 11, 4, 5, 12, 13, 6, 7, 14, 15], # 12-Bit, Dual Channel
+                                                        [0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15]  # 12-Bit, Quad Channel
                                                     ])
         self.comb += self.adc_shuffler.shuffle.eq(self._data_channels.fields.shuffle)
 
