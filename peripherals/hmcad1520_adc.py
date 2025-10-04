@@ -211,7 +211,7 @@ class HMCAD1520ADC(LiteXModule):
                     p_REFCLK_FREQUENCY      = 200.0,
                     p_PIPE_SEL              = "FALSE",
                     p_IDELAY_TYPE           = "VARIABLE",
-                    p_IDELAY_VALUE          = 6,
+                    p_IDELAY_VALUE          = 0,
 
                     i_C        = ClockSignal("sys"),
                     i_LD       = self._control.fields.delay_rst,
@@ -363,7 +363,7 @@ class HMCAD1520ADC(LiteXModule):
                         p_REFCLK_FREQUENCY      = 200.0,
                         p_PIPE_SEL              = "FALSE",
                         p_IDELAY_TYPE           = "VARIABLE",
-                        p_IDELAY_VALUE          = 6,
+                        p_IDELAY_VALUE          = 0,
 
                         i_C        = ClockSignal("sys"),
                         i_LD       = self._control.fields.delay_rst,
