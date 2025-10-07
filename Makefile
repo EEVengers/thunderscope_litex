@@ -7,11 +7,11 @@ include version.mk
 export BUILD_VERSION
 
 # Use Python3.  Some systems may need this to be just 'python'
-PY:=python3
+PY?=python3
 
 PROJECT:=thunderscope
 
-LITEX_RELEASE_TAG:=2024.12
+LITEX_RELEASE_TAG:=2025.08
 
 # List all build variants
 BETA_VARIANTS:= a50t a100t a200t
