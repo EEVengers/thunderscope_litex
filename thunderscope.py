@@ -45,8 +45,7 @@ from litepcie.software import generate_litepcie_software
 from litescope import LiteScopeAnalyzer
 
 from peripherals.windowRemapper import WindowRemapper
-# from peripherals.hmcad15xx_adc import HMCAD15XXADC
-from peripherals.had1511_adc import HAD1511ADC
+from peripherals.hmcad1520_adc import HMCAD1520ADC
 from peripherals.trigger import Trigger
 
 
@@ -140,7 +139,7 @@ a7_484_io = [
         # Lanes polarity:       X   X       X   X   X   X   X      # (X=Inverted).
         Subsignal("d_p", Pins("A15 B15 B17 A13 F16 D14 E13 F13")), # Data.
         Subsignal("d_n", Pins("A16 B16 B18 A14 E17 D15 E14 F14")),
-        IOStandard("LVDS_25"),
+        IOStandard("RSDS_25"),
         Misc("DIFF_TERM=TRUE"),
     ),
 
@@ -228,7 +227,7 @@ a7_325_io = [
         # Lanes polarity:               X   X       X   X   X      # (X=Inverted).
         Subsignal("d_p", Pins("U4  V3  U7  V8  R5  T4  U6  R7")),  # Data.
         Subsignal("d_n", Pins("V4  V2  V6  V7  T5  T3  U5  T7")),
-        IOStandard("LVDS_25"),
+        IOStandard("RSDS_25"),
         Misc("DIFF_TERM=FALSE"),
     ),
 
@@ -341,7 +340,7 @@ a7_thunderscope_rev5 = [
         # Lanes polarity:                   X                      # (X=Inverted).
         Subsignal("d_p", Pins(" B9 B10 D11 C11 A13 B14 D13 C14")), # Data.
         Subsignal("d_n", Pins(" A9 A10 C12 B11 A14 A15 C13 B15")),
-        IOStandard("LVDS_25"),
+        IOStandard("RSDS_25"),
         Misc("DIFF_TERM=TRUE"),
     ),
 
@@ -382,7 +381,7 @@ class Platform(Xilinx7SeriesPlatform):
             "set_property BITSTREAM.CONFIG.CONFIGFALLBACK ENABLE [current_design]",
             "set_property BITSTREAM.GENERAL.COMPRESS TRUE [current_design]",
             f"set_property CFGBVS {self.device_list[variant]['cfgbvs']} [current_design]",
-            f"set_property CONFIG_VOLTAGE {self.device_list[variant]['config']} [current_design]",
+            f"set_property CONFIG_VOLTAGE {self.device_list[variant]['config']} [current_design]"
         ]
 
         if self.device_list[variant]["flash_size"] > 16 :
@@ -420,7 +419,9 @@ class Platform(Xilinx7SeriesPlatform):
 
     def do_finalize(self, fragment):
         Xilinx7SeriesPlatform.do_finalize(self, fragment)
-        self.add_period_constraint(self.lookup_request("adc_data:lclk_p", loose=True), 2e9/1000e6)
+        self.add_period_constraint(self.lookup_request("adc_data:lclk_p", loose=True), 1e9/500e6)
+        self.add_false_path_constraint(self.lookup_request("adc_data:lclk_p", loose=True), self.lookup_request("sys:clk", loose=True))
+        
 
 # CRG ----------------------------------------------------------------------------------------------
 
@@ -431,23 +432,6 @@ class CRG(Module):
         self.clock_domains.cd_sys    = ClockDomain()
         self.clock_domains.cd_idelay = ClockDomain()
 
-        # CFGM Clk ~65MHz.
-        # cfgm_clk      = Signal()
-        # cfgm_clk_freq = int(65e6)
-        # self.specials += Instance("STARTUPE2",
-        #     i_CLK       = 0,
-        #     i_GSR       = 0,
-        #     i_GTS       = 0,
-        #     i_KEYCLEARB = 1,
-        #     i_PACK      = 0,
-        #     i_USRCCLKO  = cfgm_clk,
-        #     i_USRCCLKTS = 0,
-        #     i_USRDONEO  = 1,
-        #     i_USRDONETS = 1,
-        #     o_CFGMCLK   = cfgm_clk
-        # )
-        # platform.add_period_constraint(cfgm_clk, 1e9/65e6)
-
         # PLL.
         self.submodules.pll = pll = S7PLL(speedgrade=-2)
         self.comb += pll.reset.eq(self.rst)
@@ -455,8 +439,10 @@ class CRG(Module):
         clk = platform.request("clk50", loose = True)
         if clk is not None:
             pll.register_clkin(clk, 50e6)
+            platform.add_period_constraint(pll.clkin, 1e9/50e6)
         else:
             pll.register_clkin(platform.request("clk25"), 25e6)
+            platform.add_period_constraint(pll.clkin, 1e9/25e6)
         pll.create_clkout(self.cd_sys, sys_clk_freq, reset_buf="bufg")
         pll.create_clkout(self.cd_idelay, 200e6)
         platform.add_false_path_constraints(self.cd_sys.clk, pll.clkin) # Ignore sys_clk to pll.clkin path created by SoC's rst.
@@ -465,24 +451,6 @@ class CRG(Module):
 
         # IDELAYCTRL.
         self.submodules.idelayctrl = S7IDELAYCTRL(self.cd_idelay)
-        # self.rst          = Signal()
-        # self.cd_sys       = ClockDomain()
-        # self.cd_sys4x     = ClockDomain()
-        # self.cd_sys4x_dqs = ClockDomain()
-        # self.cd_idelay    = ClockDomain()
-
-        # # # #
-
-        # self.pll = pll = S7PLL(speedgrade=-2)
-        # self.comb += pll.reset.eq(self.rst)
-        # pll.register_clkin(platform.request("clk50"), 50e6)
-        # pll.create_clkout(self.cd_sys,       sys_clk_freq)
-        # pll.create_clkout(self.cd_sys4x,     4*sys_clk_freq)
-        # pll.create_clkout(self.cd_sys4x_dqs, 4*sys_clk_freq, phase=90)
-        # pll.create_clkout(self.cd_idelay,    200e6)
-        # platform.add_false_path_constraints(self.cd_sys.clk, pll.clkin) # Ignore sys_clk to pll.clkin path created by SoC's rst.
-
-        # self.idelayctrl = S7IDELAYCTRL(self.cd_idelay)
 
 # BaseSoC -----------------------------------------------------------------------------------------
 
@@ -519,7 +487,7 @@ class BaseSoC(SoCMini):
         variant       ="dev",
         with_frontend = True,
         with_adc      = True,
-        with_jtagbone = False,
+        with_jtagbone = True,
         with_analyzer = False,
         **kwargs
     ):
@@ -831,19 +799,20 @@ class BaseSoC(SoCMini):
                     # Trigger.
                     self.submodules.trigger = Trigger()
 
-                    # HMCAD15XX.
-                    # self.submodules.hmcad1520 = HMCAD15XXADC(data_pads, sys_clk_freq, frame_polarity, lanes_polarity=data_polarity)
-                    self.submodules.hmcad1520 = HAD1511ADC(data_pads, sys_clk_freq, frame_polarity, lanes_polarity=data_polarity)
-                    self.submodules.conv = stream.Converter(64, data_width)
+                    # HMCAD1520.
+                    self.submodules.hmcad1520 = HMCAD1520ADC(pads=data_pads,
+                                                             sys_clk_freq=sys_clk_freq,
+                                                             frame_polarity=frame_polarity,
+                                                             lanes_polarity=data_polarity,
+                                                             clock_domain="sys")
 
                     # Gate.
-                    self.submodules.gate = stream.Gate([("data", 128)], sink_ready_when_disabled=True)
+                    self.submodules.gate = stream.Gate([("data", data_width)], sink_ready_when_disabled=True)
                     self.comb += self.gate.enable.eq(self.trigger.enable)
 
                     # Pipeline.
                     self.submodules += stream.Pipeline(
                         self.hmcad1520,
-                        self.conv,
                         self.gate,
                         self.source
                     )
@@ -872,19 +841,19 @@ class BaseSoC(SoCMini):
             )
 
             # ADC -> PCIe.
-            self.comb += self.adc.source.connect(self.pcie_dma0.sink)
+            self.sync += self.adc.source.connect(self.pcie_dma0.sink)
 
-            # Analyzer -----------------------------------------------------------------------------
+        # Analyzer -----------------------------------------------------------------------------
 
-            if with_analyzer:
-                analyzer_signals = [
-                ]
-                self.submodules.analyzer = LiteScopeAnalyzer(analyzer_signals,
-                    depth        = 1024,
-                    clock_domain = "sys",
-                    samplerate   = sys_clk_freq,
-                    csr_csv      = "test/analyzer.csv"
-                )
+        if with_analyzer:
+            analyzer_signals = [
+            ]
+            self.submodules.analyzer = LiteScopeAnalyzer(analyzer_signals,
+                depth        = 1024,
+                clock_domain = "adc_frame",
+                samplerate   = sys_clk_freq,
+                csr_csv      = "test/analyzer.csv"
+            )
 
 # Build --------------------------------------------------------------------------------------------
 

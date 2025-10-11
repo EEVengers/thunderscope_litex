@@ -107,7 +107,7 @@ class HAD1511ADC(LiteXModule):
 
         if pads is not None:
             self.clock_domains.cd_adc       = ClockDomain() # ADC Bitclock.
-            self.clock_domains.cd_adc_frame = ClockDomain() # ADC Frameclock (freq : ADC Bitclock/8).
+            self.clock_domains.cd_adc_frame = ClockDomain() # ADC Frameclock (freq : ADC Bitclock/4).
             adc_clk = Signal()
             self.specials += Instance("IBUFDS",
                 i_I  = pads.lclk_p,
@@ -187,10 +187,10 @@ class HAD1511ADC(LiteXModule):
                 fclk_timer.wait.eq(~fclk_timer.done),
                 If(fclk_timer.done,
                     If(frame_polarity,
-                        If((fclk != 0xf0) & (fclk != 0xCC) & (fclk != 0xAA),
+                        If((fclk != 0xf0),
                             bitslip.eq(1)
                         )
-                    ).Elif((fclk != 0xf) & (fclk != 0x33) & (fclk != 0x55),
+                    ).Elif((fclk != 0xf),
                             bitslip.eq(1)
                     )
                 )

@@ -90,7 +90,7 @@ $(GEN_VARIANTS): gen-% : $(SOURCES) venv
 
 driver: venv
 	$(VENV_ACTIVATE) && \
-	$(PY) $(PROJECT).py --driver --driver-dir=$(BUILD_PATH)/$(PROJECT)/driver
+	$(PY) $(PROJECT).py --driver --driver-dir=$(BUILD_PATH)/$(PROJECT)/driver --csr-csv=$(BUILD_PATH)/$(PROJECT)/csr.csv
 
 docs: venv
 	$(VENV_ACTIVATE) && \
