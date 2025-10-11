@@ -508,7 +508,6 @@ class BaseSoC(SoCMini):
         SoCMini.__init__(self, platform, sys_clk_freq,
             ident         = f"LitePCIe SoC on ThunderScope {variant.upper()} ({version_string})",
             ident_version = True,
-            bus_interconnect = "crossbar",
         )
 
 
@@ -573,7 +572,7 @@ class BaseSoC(SoCMini):
             "Vendor_ID": "20A7",
             "Device_ID": "0101"
         })
-        self.add_pcie(phy=self.pcie_phy, ndmas=1, dma_buffering_depth=512*16,
+        self.add_pcie(phy=self.pcie_phy, ndmas=1, dma_buffering_depth=1024*16,
                       max_pending_requests=4, address_width=64)
 
 
@@ -848,12 +847,9 @@ class BaseSoC(SoCMini):
 
         if with_analyzer:
             analyzer_signals = [
-                self.adc.hmcad1520.bitslip,
-                self.adc.hmcad1520.frame_valid,
-                self.adc.hmcad1520.fclk
             ]
             self.submodules.analyzer = LiteScopeAnalyzer(analyzer_signals,
-                depth        = 512,
+                depth        = 1024,
                 clock_domain = "adc_frame",
                 samplerate   = sys_clk_freq,
                 csr_csv      = "test/analyzer.csv"
