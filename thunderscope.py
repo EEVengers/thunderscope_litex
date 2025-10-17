@@ -481,7 +481,7 @@ class BaseSoC(SoCMini):
             ]
             self.submodules.analyzer = LiteScopeAnalyzer(analyzer_signals,
                 depth        = 1024,
-                clock_domain = "adc_frame",
+                clock_domain = "sys",
                 samplerate   = sys_clk_freq,
                 csr_csv      = "test/analyzer.csv"
             )
@@ -496,13 +496,14 @@ def main():
     target_group.add_argument("--flash",     action="store_true", help="Flash bitstream.")
     target_group.add_argument("--driver",    action="store_true", help="Generate PCIe driver.")
     target_group.add_argument("--cable",     default="digilent_hs2", help="JTAG cable name.")
-    target_group.add_argument("--driver-dir", default="software", help="Directory to store driver")
+    target_group.add_argument("--driver-dir", default="build/software", help="Directory to store driver")
+    target_group.add_argument("--with_jtagbone", default=True, help="Enable JTAG Master.")
 
     
     args = parser.parse_args()
 
     # Build SoC.
-    soc = BaseSoC(variant = args.variant,  **parser.soc_argdict)
+    soc = BaseSoC(variant = args.variant, **parser.soc_argdict)
 
     builder  = Builder(soc,  **parser.builder_argdict)
     os.makedirs(builder.gateware_dir, exist_ok=True)
