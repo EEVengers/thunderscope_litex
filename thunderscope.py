@@ -92,8 +92,8 @@ class BaseSoC(SoCMini):
         "pcie_endpoint": 4,
         "pcie_dma0": 5,
         "ctrl": 6,
-        "spiflash": 7,
-        "<reserved>": 8, # This was previously a second bank of spiflash registers
+        "spiflash_core": 7,
+        "spiflash_phy": 8,
         "flash_adapter": 9,
         "icap": 10,
         "xadc": 11,
