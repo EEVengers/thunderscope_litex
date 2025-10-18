@@ -12,6 +12,7 @@ PY?=python3
 PROJECT:=thunderscope
 
 LITEX_RELEASE_TAG:=2024.12
+export LITEX_RELEASE_TAG
 
 # List all build variants
 BETA_VARIANTS:= a50t a100t a200t

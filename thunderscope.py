@@ -9,8 +9,10 @@
 
 import shutil, os
 import subprocess
+from importlib.metadata import version
 
 from migen import *
+from migen.genlib.cdc import MultiReg
 
 from litex.gen import *
 
@@ -130,12 +132,17 @@ class BaseSoC(SoCMini):
             version_string = os.getenv("BUILD_VERSION")
         else:
             commit, dirty = get_commit_hash_string()
-            version_string = commit[0:8]
+            version_string = "0.0.0-"+commit[0:8]
             if dirty:
                 version_string += "-dirty"
-            
+
+        if os.getenv("LITEX_RELEASE_TAG") is not None:
+            litex_ver = os.getenv("LITEX_RELEASE_TAG")
+        else:
+            litex_ver = version("litex")
+
         SoCMini.__init__(self, platform, sys_clk_freq,
-            ident         = f"LitePCIe SoC on ThunderScope {variant.upper()} ({version_string})",
+            ident         = f"ThunderScope {variant.upper()} ({version_string}) built with LiteX {litex_ver}",
             ident_version = True,
         )
 
@@ -158,8 +165,22 @@ class BaseSoC(SoCMini):
                                     CSRField("hw_valid", offset=9, size=1, description="HW ID is valid for this board."),
                                     CSRField("num_leds", offset=16, size=4, description="Number of LEDs available")
                                 ])
+
                 # Gateware Version Info
-                self._gw_rev = CSRStatus(name="gw_rev", size=32, reset=0x0000_0300)
+                gw_major = int(version_string.split('.')[0])
+                gw_minor = int(version_string.split('.')[1])
+                gw_patch = version_string.split('.')[2]
+                gw_rev_val = (min(gw_major,2**16 - 1) * (2**16)) + (min(gw_minor,2**8 - 1) * 2**8)
+                gw_rev_val = gw_rev_val + (min(int(gw_patch.split('-')[0]),2**7 - 1) * 2)
+                if 'next' in gw_patch:
+                    gw_rev_val = gw_rev_val + 1
+                self._gw_rev = CSRStatus(name="gw_rev", size=32, reset=gw_rev_val)
+
+                # Litex Build Version Info
+                litex_major = int(litex_ver.split('.')[0])
+                litex_minor = int(litex_ver.split('.')[1])
+                litex_rel = (litex_major * (2**16)) + litex_minor
+                self._litex_ver = CSRStatus(name="litex_rel", size=32, reset=litex_rel)
 
                 if led_pads is not None:
                     self.comb += led_pads.eq(self._leds.storage)
@@ -233,7 +254,7 @@ class BaseSoC(SoCMini):
             "dev":   lambda: MX25U6435E(Codes.READ_1_1_4, program_cmd=Codes.PP_1_1_4),
             "prod":  lambda: MX25U6435E(Codes.READ_1_1_4, program_cmd=Codes.PP_1_1_4)
         }
-        self.add_spi_flash(mode="4x", module=spi_flash_modules[variant](), clk_freq=65e6,
+        self.add_spi_flash(mode="4x", module=spi_flash_modules[variant](),
                            rate="1:1", with_mmap=True, with_master=True, with_mmap_write="csr")
 
         # # QSPI Flash Adapter -----------------------------------------------------------------------
@@ -406,6 +427,10 @@ class BaseSoC(SoCMini):
                             ("``0b0``", "ADC No Power."),
                             ("``0b1``", "ADC Power."),
                         ]),
+                        CSRField("frame_sync", offset=1, size=1, description="ADC Frame Sync.", values=[
+                            ("``0b0``", "ADC Frame Clock not in sync."),
+                            ("``0b1``", "ADC has good sync with Frame Clock."),
+                        ]),
                     ])
 
                     # Data Source.
@@ -436,6 +461,9 @@ class BaseSoC(SoCMini):
                                                              frame_polarity=frame_polarity,
                                                              lanes_polarity=data_polarity,
                                                              clock_domain="sys")
+
+                    # ADC Sync Status
+                    self.specials += MultiReg(self.hmcad1520.frame_valid, self._status.fields.frame_sync)
 
                     # Gate.
                     self.submodules.gate = stream.Gate([("data", data_width)], sink_ready_when_disabled=True)
