@@ -8,3 +8,4 @@ software
 *.log
 *.csv
 *.cfg
+.vscode

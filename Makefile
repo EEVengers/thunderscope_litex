@@ -7,11 +7,12 @@ include version.mk
 export BUILD_VERSION
 
 # Use Python3.  Some systems may need this to be just 'python'
-PY:=python3
+PY?=python3
 
 PROJECT:=thunderscope
 
 LITEX_RELEASE_TAG:=2024.12
+export LITEX_RELEASE_TAG
 
 # List all build variants
 BETA_VARIANTS:= a50t a100t a200t
@@ -52,8 +53,8 @@ $(VENV_PATH)/.stamp_$(LITEX_RELEASE_TAG):
 	pip install -r requirements.txt && \
 	mkdir $(VENV_PATH)/litex && \
 	cd $(VENV_PATH)/litex && \
-	wget https://raw.githubusercontent.com/enjoy-digital/litex/master/litex_setup.py && \
-	$(PY) litex_setup.py --init --install --tag $(LITEX_RELEASE_TAG)
+	wget https://raw.githubusercontent.com/enjoy-digital/litex/$(LITEX_RELEASE_TAG)/litex_setup.py && \
+	$(PY) litex_setup.py --init --install --tag=$(LITEX_RELEASE_TAG)
 	touch $(VENV_PATH)/.stamp_$(LITEX_RELEASE_TAG)
 
 venv: $(VENV_PATH)/.stamp_$(LITEX_RELEASE_TAG)
