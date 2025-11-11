@@ -147,7 +147,8 @@ class HMCAD1520ADC(LiteXModule):
             CSRField("data_width",offset=0, size=2, reset=0, description="Select the ADC Sample data width.",
                     values=[
                         (0b00, "8-bit"),
-                        (0b01, "12-bit")
+                        (0b01, "12-bit MSB Justified",
+                         0b10, "12-bit LSB Justified")
                     ])
         ])
         self._frame_debug = CSRStatus(fields=[
@@ -256,9 +257,9 @@ class HMCAD1520ADC(LiteXModule):
                 bitslip.eq(0),
                 fclk_timer.wait.eq(~fclk_timer.done),
                 If(fclk_timer.done,
-                    If((width_bits == 0b0) & (fclk != frame_valid_8),
+                    If((width_bits == 0b00) & (fclk != frame_valid_8),
                         bitslip.eq(1)
-                    ).Elif((width_bits == 0b1) & ((fclk != frame_valid_12[0])
+                    ).Elif(((width_bits == 0b01) | (width_bits == 0b10)) & ((fclk != frame_valid_12[0])
                             & (fclk != frame_valid_12[1]) & (fclk != frame_valid_12[2])),
                         bitslip.eq(1)
                     )
@@ -278,10 +279,10 @@ class HMCAD1520ADC(LiteXModule):
                 NextValue(frame_valid, 0),
                 NextState("DETECT0"),
                 # Wait for the next frame clock to be valid.
-                If((width_bits == 0b0) & (fclk == frame_valid_8),
+                If((width_bits == 0b00) & (fclk == frame_valid_8),
                     NextValue(frame_valid, 1),
                     NextState("SYNC")
-                ).Elif((width_bits == 0b1) & (fclk == frame_valid_12[0]),
+                ).Elif(((width_bits == 0b01) | (width_bits == 0b10)) & (fclk == frame_valid_12[0]),
                     NextState("DETECT1")
                 )
             )
@@ -289,7 +290,7 @@ class HMCAD1520ADC(LiteXModule):
                 # Start of Frame detected.
                 NextValue(frame_valid, 0),
                 # Wait for the next frame clock to be valid.
-                If((width_bits == 0b1) & (fclk == frame_valid_12[1]),
+                If(((width_bits == 0b01) | (width_bits == 0b10)) & (fclk == frame_valid_12[1]),
                     NextState("DETECT2")
                 ).Else(
                     # If the next frame clock is not valid, wait for the next one.
@@ -300,7 +301,7 @@ class HMCAD1520ADC(LiteXModule):
                 # Start of Frame detected.
                 NextValue(frame_valid, 0),
                 # Wait for the next frame clock to be valid.
-                If((width_bits == 0b1) & (fclk == frame_valid_12[2]),
+                If(((width_bits == 0b01) | (width_bits == 0b10)) & (fclk == frame_valid_12[2]),
                     NextValue(frame_valid, 1),
                     NextState("SYNC")
                 ).Else(
@@ -312,10 +313,10 @@ class HMCAD1520ADC(LiteXModule):
                 If(bitslip,
                     NextValue(frame_valid, 0),
                     NextState("DETECT0")
-                ).Elif((width_bits == 0b0) & (fclk != frame_valid_8),
+                ).Elif((width_bits == 0b00) & (fclk != frame_valid_8),
                     NextValue(frame_valid, 0),
                     NextState("DETECT0")
-                ).Elif((width_bits == 0b1) & ((fclk != frame_valid_12[0])
+                ).Elif(((width_bits == 0b01) | (width_bits == 0b10)) & ((fclk != frame_valid_12[0])
                         & (fclk != frame_valid_12[1]) & (fclk != frame_valid_12[2])),
                     NextValue(frame_valid, 0),
                     NextState("DETECT0")
@@ -414,12 +415,17 @@ class HMCAD1520ADC(LiteXModule):
                 gearbox_cases = {}
                 gearbox_cases[0] = [
                     adc_source.data[16*i:16*(i+1)].eq(d8_gear.source.data[0:16]),
-                    adc_source.valid.eq(d8_gear.source.valid),
+                    adc_source.valid.eq(d8_gear.source.valid)
                 ]
                 gearbox_cases[1] = [
                     adc_source.data[((16*i)+4):(16*(i+1))].eq(d12_gear.source.data),
                     {adc_source.data[(16*i)+j].eq(0) for j in range(4)},
-                    adc_source.valid.eq(d12_gear.source.valid),
+                    adc_source.valid.eq(d12_gear.source.valid)
+                ]
+                gearbox_cases[2] = [
+                    adc_source.data[((16*i)):(16*(i+1)-4)].eq(d12_gear.source.data),
+                    {adc_source.data[16*(i+1)-4+j].eq(0) for j in range(4)},
+                    adc_source.valid.eq(d12_gear.source.valid)
                 ]
 
                 self.sync.adc_frame += [
@@ -445,12 +451,13 @@ class HMCAD1520ADC(LiteXModule):
         # Data from the HMCAD1520 comes in the order [1 1 2 2 3 3 4 4] for 4-channel operation
         #  and [1 1 1 1 2 2 2 2] for 2-channel operation.  Shuffle the data so the output data
         #  stream is [1 2 3 4 1 2 3 4] and [1 2 1 2 1 2 1 2] respectively.
-        self.adc_shuffler = ByteShuffler(6, byte_swap=[ [0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5, 7, 9, 11, 13, 15], # 8-Bit, Single Channel
+        self.adc_shuffler = ByteShuffler(7, byte_swap=[ [0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5, 7, 9, 11, 13, 15], # 8-Bit, Single Channel
                                                         [0, 8, 2, 10, 4, 12, 6, 14, 1, 9, 3, 11, 5, 13, 7, 15], # 8-Bit, Dual Channel
                                                         [0, 4, 8, 12, 2, 6, 10, 14, 1, 5, 9, 13, 3, 7, 11, 15], # 8-Bit, Quad Channel
                                                         [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], # 12-Bit, Single Channel
                                                         [0, 1, 8, 9, 2, 3, 10, 11, 4, 5, 12, 13, 6, 7, 14, 15], # 12-Bit, Dual Channel
-                                                        [0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15]  # 12-Bit, Quad Channel
+                                                        [0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15], # 12-Bit, Quad Channel
+                                                        [2, 0, 6, 4, 10, 8, 14, 12, 3, 1, 7, 5, 11, 9, 15, 13]  # Dual 8-Bit, Quad Channel
                                                     ])
         self.comb += self.adc_shuffler.shuffle.eq(self._data_channels.fields.shuffle)
 
