@@ -1,2 +1,4 @@
+setuptools
+dearpygui
 sphinx
 sphinxcontrib-wavedrom
