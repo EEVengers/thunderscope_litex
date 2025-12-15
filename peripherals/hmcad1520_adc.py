@@ -147,8 +147,8 @@ class HMCAD1520ADC(LiteXModule):
             CSRField("data_width",offset=0, size=2, reset=0, description="Select the ADC Sample data width.",
                     values=[
                         (0b00, "8-bit"),
-                        (0b01, "12-bit MSB Justified",
-                         0b10, "12-bit LSB Justified")
+                        (0b01, "12-bit MSB Justified"),
+                        (0b10, "12-bit LSB Justified")
                     ])
         ])
         self._frame_debug = CSRStatus(fields=[
