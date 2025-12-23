@@ -250,7 +250,6 @@ class BaseSoC(SoCMini):
             "a100t": lambda: S25FL256S(Codes.READ_1_1_4_4B, program_cmd=Codes.PP_1_1_4_4B, erase_cmd=Codes.SE_4B),
             "a200t": lambda: S25FL256S(Codes.READ_1_1_4_4B, program_cmd=Codes.PP_1_1_4_4B, erase_cmd=Codes.SE_4B),
             "a50t":  lambda: MX25U6435E(Codes.READ_1_1_4, program_cmd=Codes.PP_1_1_4),
-            "a35t":  lambda: MX25U6435E(Codes.READ_1_1_4, program_cmd=Codes.PP_1_1_4),
             "dev":   lambda: MX25U6435E(Codes.READ_1_1_4, program_cmd=Codes.PP_1_1_4),
             "prod":  lambda: MX25U6435E(Codes.READ_1_1_4, program_cmd=Codes.PP_1_1_4)
         }
@@ -479,14 +478,12 @@ class BaseSoC(SoCMini):
             adc_polarity = {"a100t" : [1, 1, 0, 1, 1, 1, 1, 1],
                             "a200t" : [1, 1, 0, 1, 1, 1, 1, 1],
                             "a50t"  : [0, 0, 1, 1, 0, 1, 1, 1],
-                            "a35t"  : [0, 0, 1, 1, 0, 1, 1, 1],
                             "dev"   : [0, 0, 0, 1, 0, 0, 0, 0],
                             "prod"  : [0, 0, 0, 1, 0, 0, 0, 0],
                             }
             frame_polarity = {"a100t" : 0,
                               "a200t" : 0,
                               "a50t"  : 0,
-                              "a35t"  : 0,
                               "dev"   : 1,
                               "prod"  : 1,
                               }

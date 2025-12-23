@@ -139,7 +139,8 @@ class HMCAD1520ADC(LiteXModule):
                         (2, "4-Channel 8-bit Shuffling"),
                         (3, "1-Channel 12-bit Shuffling"),
                         (4, "2-Channel 12-bit Shuffling"),
-                        (5, "4-Channel 12-bit Shuffling")
+                        (5, "4-Channel 12-bit Shuffling"),
+                        (6, "4-Channel 14-bit Shuffling")
                     ]),
             CSRField("run_length",  offset=8, size=6, reset=1, description="Control Run-Length of samples for each channel ordered next to each other (Not Implemented)")            
         ])
