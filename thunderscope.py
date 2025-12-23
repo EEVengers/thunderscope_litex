@@ -44,7 +44,7 @@ from litescope import LiteScopeAnalyzer
 from peripherals.windowRemapper import WindowRemapper
 from peripherals.hmcad1520_adc import HMCAD1520ADC
 from peripherals.trigger import Trigger
-
+from peripherals.eventEngine import *
 from thunderscope_platform import *
 
 
@@ -104,7 +104,8 @@ class BaseSoC(SoCMini):
         "frontend": 14,
         "probe_compensation": 15,
         "i2cbus": 16,
-        "spibus": 17
+        "spibus": 17,
+        "events":18,
         # Max Offset: 31
         # Offset 32+ reserved for ota mem
     }
@@ -118,6 +119,7 @@ class BaseSoC(SoCMini):
         variant       ="dev",
         with_frontend = True,
         with_adc      = True,
+        with_events   = True,
         with_jtagbone = True,
         with_analyzer = False,
         **kwargs
@@ -475,6 +477,18 @@ class BaseSoC(SoCMini):
                         self.source
                     )
 
+                    # Captured Sample Counter
+                    self.sample_count = sample_count = Signal(64)
+                    self.sync += [
+                        If(self._status.fields.frame_sync,
+                           If(self.source.ready & self.gate.source.valid,
+                                sample_count.eq(sample_count + 1)
+                            )
+                        ).Else(
+                            sample_count.eq(0)
+                        )
+                    ]
+
             adc_polarity = {"a100t" : [1, 1, 0, 1, 1, 1, 1, 1],
                             "a200t" : [1, 1, 0, 1, 1, 1, 1, 1],
                             "a50t"  : [0, 0, 1, 1, 0, 1, 1, 1],
@@ -498,6 +512,24 @@ class BaseSoC(SoCMini):
 
             # ADC -> PCIe.
             self.sync += self.adc.source.connect(self.pcie_dma0.sink)
+
+        # Event Subsystem ----------------------------------------------------------------------
+
+        if with_events:
+            class Events(LiteXModule):
+                def __init__(self, sys_clk_freq, marker=None):
+                    self.submodules.engine = evt_engine = EventEngine(marker)
+                    self.submodules.generator = evt_gen = EventGenerator(sys_clk_freq)
+                    self.submodules.ext_sync = ext_sync = ExternalSync(pads=platform.request("sync"))
+
+                    evt_engine.add_input(evt_gen.event)
+                    evt_engine.add_input(ext_sync.ext_in)
+
+                    evt_engine.add_output(ext_sync.ext_out)
+
+                    evt_engine.map_events()
+
+            self.submodules.events = Events(sys_clk_freq, self.adc.sample_count)
 
         # Analyzer -----------------------------------------------------------------------------
 
