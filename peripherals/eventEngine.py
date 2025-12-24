@@ -25,7 +25,7 @@ class EventFIFO(LiteXModule):
         self.eventFifo = AsyncFIFOBuffered(width = 72, depth=1024)
         self.eventData = stream.Endpoint(event_layout)
 
-        self._readport = CSRStatus(32, description="Event Source ID")
+        self._readport = CSRStatus(8, description="Event Source ID")
         self._readmarker = CSRStatus(64, description="Sample Counter where event ocurred")
 
         # Input from signal gets pushed to fifo
@@ -103,18 +103,21 @@ class EventGenerator(LiteXModule):
         ]
 
 class ExternalSync(LiteXModule):
-    def __init__(self, pads=None):
+    def __init__(self, pads=None, sys_clk_freq=100e6):
         self.ext_in = Signal()
         self.ext_out = Signal()
 
         _in_unfiltered = Signal()
         _out_pulse = Signal()
+        _ext_out_last = Signal()
 
         self._control  = CSRStorage(2, description="Sync Tristate(s) Control. Valid Values are:"\
                                         "\n\t0b00 - Disabled" \
                                         "\n\t0b01 - Input Enabled" \
                                         "\n\t0b10 - Output Enabled"
                                     )
+        self._pulse_len = CSRStorage(20, reset=50,
+                                     description="Pulse Width of the Sync Output Signal in microseconds (us). Default is 50us")
         self._status  = CSRStatus(fields=[
             CSRField("evt_in", offset=0, size=1,  description="Sync Input Status."),
             CSRField("evt_out", offset=8, size=1,  description="Sync Output Status.")
@@ -129,8 +132,27 @@ class ExternalSync(LiteXModule):
         self.specials += MultiReg(i=_in_unfiltered, o=self.ext_in)
 
         # Set Output Pulse Width
-        # TODO
-        self.comb += _out_pulse.eq(self.ext_out)
+        pulse_counter = Signal(20)
+        pulse_timer = WaitTimer(int((1e-6)*sys_clk_freq)) # 1us Timer
+
+        self.sync += [
+            pulse_timer.wait.eq(_out_pulse),
+            If((_ext_out_last == 0) & self.ext_out, # Rising edge detect
+                pulse_counter.eq(self._pulse_len.storage),
+                _out_pulse.eq(1),
+                pulse_timer.wait.eq(1),
+            ),
+            If(pulse_timer.done,
+                If(pulse_counter == 0,
+                   _out_pulse.eq(0),
+                   pulse_timer.wait.eq(0),
+                ).Else(
+                    pulse_counter.eq(pulse_counter - 1),
+                   _out_pulse.eq(1)
+                )
+            ),
+            _ext_out_last.eq(self.ext_out)
+        ]
 
         if pads is not None:
             if hasattr(pads, "de"):
@@ -167,6 +189,7 @@ class ExternalSync(LiteXModule):
                 self.comb += [
                     _in_unfiltered.eq(io.i),
                     io.o.eq(_out_pulse),
-                    If(self._control.storage == 0b10, io.oe.eq(1)
-                                ).Else(io.io.eq(0))
+                    If(self._control.storage == 0b10,
+                       io.oe.eq(1)
+                    ).Else(io.io.eq(0))
                 ]
