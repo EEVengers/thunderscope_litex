@@ -9,12 +9,12 @@ from migen.genlib.resetsync import AsyncResetSynchronizer
 
 from migen.genlib.misc import WaitTimer
 from migen.genlib.cdc import MultiReg
-from migen.genlib.fifo import AsyncFIFOBuffered
 
 from litex.gen import *
 
 from litex.soc.interconnect.csr import *
 from litex.soc.interconnect import stream
+from litex.soc.interconnect.stream import *
 
 event_layout = [("data", 64), ("type", 4), ("reserved", 4)]
 
@@ -22,16 +22,72 @@ _EVENT_IN_OUT_MAX = 12
 
 class EventFIFO(LiteXModule):
     def __init__(self):
-        self.eventFifo = AsyncFIFOBuffered(width = 72, depth=1024)
+        self.flush = Signal()
+        self.eventAvailable = Signal()
         self.eventData = stream.Endpoint(event_layout)
+        
+        _flush_holdoff = Signal()
+        _eventReader = stream.Endpoint(event_layout)
+        _eventFifo = stream.SyncFIFO(layout=event_layout, depth=1024, buffered=True)
 
-        self._readport = CSRStatus(8, description="Event Source ID")
+        self._readsource = CSRStatus(fields=[
+            CSRField("source", offset=0, size=4, description="Event Source ID"),
+            CSRField("reserved", offset=4, size=4, description="Reserved")
+        ])
         self._readmarker = CSRStatus(64, description="Sample Counter where event ocurred")
 
         # Input from signal gets pushed to fifo
+        self.comb += [
+            _eventFifo.sink.connect(self.eventData),
+            _eventFifo.sink.valid.eq(self.eventData.valid & ~_flush_holdoff)
+        ]
 
         # Register reads output from FIFO
-        # FIFO width is > 32 bit, register both values when the first one is read
+        self.sync += _eventReader.connect(_eventFifo.source)
+
+        # FIFO data is read across 3 32-bit registers, register all values when the first one is read
+        self.comb += [
+            self._readsource.fields.source.eq(_eventReader.type),
+        ]
+
+        self.sync += [
+            If(self._readsource.we,
+                self._readmarker.status.eq(_eventReader.data),
+                _eventReader.ready.eq(1),
+                self.eventAvailable.eq(0)
+            ).Elif(
+                _eventReader.ready &
+                _eventFifo.source.valid &
+                ~_flush_holdoff,
+                _eventReader.ready.eq(0),
+                self.eventAvailable.eq(1)
+            )
+        ]
+
+        # Flush Event FIFO FSM
+        flush_fsm = FSM(reset_state="IDLE")
+
+        flush_fsm.act("IDLE",
+            _flush_holdoff.eq(0),
+            NextState("IDLE"),
+            If(self.flush,
+               NextState("FLUSH"),
+                _flush_holdoff.eq(1),
+            )
+        )
+        flush_fsm.act("FLUSH",
+            _flush_holdoff.eq(1),
+            If(~_eventFifo.source.valid,
+                NextState("IDLE"),
+                NextValue(_eventReader.ready, 0),
+                NextValue(_flush_holdoff, 0)
+            ).Else(
+                NextState("FLUSH"),
+                NextValue(_flush_holdoff, 1),
+                NextValue(_eventReader.ready, 1), # Pull data out
+            )
+        )
+
 
 class EventEngine(LiteXModule):
     def __init__(self, marker=None):
@@ -39,6 +95,7 @@ class EventEngine(LiteXModule):
         self._inputs = []
         self._outputs = []
         self._marker = Signal.like(marker)
+        self._event_active = Signal()
 
         self._control = CSRStorage(fields=[
             CSRField("in_en_mask", offset=0, size=_EVENT_IN_OUT_MAX, description="Mask for enabled Input Signals."),
@@ -54,7 +111,25 @@ class EventEngine(LiteXModule):
             CSRField("pending", offset=0, size=1, description="Pending Event Ready")
         ])
 
-        # self.submodules.fifo = _fifo = EventFIFO()
+        self.submodules.fifo = _fifo = EventFIFO()
+
+        # Connect Control signals to FIFO
+        self.comb += [
+            _fifo.flush.eq(self._control.fields.event_flush),
+            self._event.fields.pending.eq(_fifo.eventAvailable)
+        ]
+
+        # Connect Event Data Source
+        self.comb += [
+            _fifo.eventData.valid.eq(0),
+            _fifo.eventData.data.eq(marker),
+            _fifo.eventData.type.eq(0),
+            _fifo.eventData.reserved.eq(0),
+            If(self._event_active,
+                _fifo.eventData.valid.eq(1),
+                _fifo.eventData.type.eq(1)
+            )
+        ]
 
 
 
@@ -191,5 +266,5 @@ class ExternalSync(LiteXModule):
                     io.o.eq(_out_pulse),
                     If(self._control.storage == 0b10,
                        io.oe.eq(1)
-                    ).Else(io.io.eq(0))
+                    ).Else(io.oe.eq(0))
                 ]
