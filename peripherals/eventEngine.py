@@ -9,6 +9,7 @@ from migen.genlib.resetsync import AsyncResetSynchronizer
 
 from migen.genlib.misc import WaitTimer
 from migen.genlib.cdc import MultiReg
+from migen.genlib.coding import PriorityEncoder
 
 from litex.gen import *
 
@@ -96,6 +97,8 @@ class EventEngine(LiteXModule):
         self._outputs = []
         self._marker = Signal.like(marker)
         self._event_active = Signal()
+        self._event_pulse = Signal()
+        self.input_encoder = PriorityEncoder(_EVENT_IN_OUT_MAX)
 
         self._control = CSRStorage(fields=[
             CSRField("in_en_mask", offset=0, size=_EVENT_IN_OUT_MAX, description="Mask for enabled Input Signals."),
@@ -121,27 +124,40 @@ class EventEngine(LiteXModule):
 
         # Connect Event Data Source
         self.comb += [
-            _fifo.eventData.valid.eq(0),
             _fifo.eventData.data.eq(marker),
-            _fifo.eventData.type.eq(0),
+            _fifo.eventData.type.eq(self.input_encoder.o),
             _fifo.eventData.reserved.eq(0),
-            If(self._event_active,
-                _fifo.eventData.valid.eq(1),
-                _fifo.eventData.type.eq(1)
-            )
+            _fifo.eventData.valid.eq(self._event_pulse)
         ]
 
-
-
     def add_input(self, input):
+        assert type(input) is Signal
         self._inputs.append(input)
 
     def add_output(self, output):
+        assert type(output) is Signal
         self._outputs.append(output)
 
     def map_events(self):
-        # TODO
-        pass
+        self.comb += [
+            self.input_encoder.i.eq(Cat(self._inputs) & self._control.fields.in_en_mask)
+        ]
+
+        self.sync += [
+            If(~self._event_active,
+                If(~self.input_encoder.n,
+                    self._event_active.eq(1),
+                    Cat(self._outputs).eq(self._control.fields.out_en_mask),
+                    self._event_pulse.eq(1),
+                ),
+            ).Else(
+                If(self.input_encoder.n,
+                    self._event_active.eq(0)
+                ),
+                Cat(self._outputs).eq(0),
+                self._event_pulse.eq(0)
+            )
+        ]
     
 class EventGenerator(LiteXModule):
     def __init__(self, sys_clk_freq=100e6):

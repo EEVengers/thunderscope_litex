@@ -522,10 +522,10 @@ class BaseSoC(SoCMini):
                     self.submodules.generator = evt_gen = EventGenerator(sys_clk_freq)
                     self.submodules.ext_sync = ext_sync = ExternalSync(pads=platform.request("sync"), sys_clk_freq=sys_clk_freq)
 
-                    evt_engine.add_input(evt_gen.event)
-                    evt_engine.add_input(ext_sync.ext_in)
+                    evt_engine.add_input(evt_gen.event) # Input 0
+                    evt_engine.add_input(ext_sync.ext_in) # Input 1
 
-                    evt_engine.add_output(ext_sync.ext_out)
+                    evt_engine.add_output(ext_sync.ext_out) # Output 1
 
                     evt_engine.map_events()
 
