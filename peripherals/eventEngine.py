@@ -95,7 +95,6 @@ class EventEngine(LiteXModule):
         self.en = Signal() # Global Event Enable
         self._inputs = []
         self._outputs = []
-        self._marker = Signal.like(marker)
         self._event_active = Signal()
         self._event_pulse = Signal()
         self.input_encoder = PriorityEncoder(_EVENT_IN_OUT_MAX)
@@ -227,7 +226,7 @@ class ExternalSync(LiteXModule):
         pulse_timer = WaitTimer(int((1e-6)*sys_clk_freq)) # 1us Timer
 
         self.sync += [
-            pulse_timer.wait.eq(_out_pulse),
+            pulse_timer.wait.eq(~pulse_timer.done & _out_pulse),
             If((_ext_out_last == 0) & self.ext_out, # Rising edge detect
                 pulse_counter.eq(self._pulse_len.storage),
                 _out_pulse.eq(1),
@@ -235,11 +234,9 @@ class ExternalSync(LiteXModule):
             ),
             If(pulse_timer.done,
                 If(pulse_counter == 0,
-                   _out_pulse.eq(0),
-                   pulse_timer.wait.eq(0),
-                ).Else(
-                    pulse_counter.eq(pulse_counter - 1),
-                   _out_pulse.eq(1)
+                   _out_pulse.eq(0)
+                ).Elif(pulse_timer.wait,
+                    pulse_counter.eq(pulse_counter - 1)
                 )
             ),
             _ext_out_last.eq(self.ext_out)
@@ -263,14 +260,14 @@ class ExternalSync(LiteXModule):
 
                 self.comb += [
                     If(self._control.storage == 0b01,
-                       pads.re_n.eq(0)
-                    ).Else(
-                        pads.re_n.eq(1)
-                    ),
-                    If(self._control.storage == 0b10,
                        pads.de.eq(1)
                     ).Else(
                         pads.de.eq(0)
+                    ),
+                    If(self._control.storage == 0b10,
+                       pads.re_n.eq(0)
+                    ).Else(
+                        pads.re_n.eq(1)
                     ),
                 ]
             else:

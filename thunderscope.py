@@ -481,7 +481,7 @@ class BaseSoC(SoCMini):
                     self.sample_count = sample_count = Signal(64)
                     self.sync += [
                         If(self._status.fields.frame_sync,
-                           If(self.source.ready & self.gate.source.valid,
+                           If(self.source.ready & self.source.valid,
                                 sample_count.eq(sample_count + 1)
                             )
                         ).Else(
@@ -525,7 +525,7 @@ class BaseSoC(SoCMini):
                     evt_engine.add_input(evt_gen.event) # Input 0
                     evt_engine.add_input(ext_sync.ext_in) # Input 1
 
-                    evt_engine.add_output(ext_sync.ext_out) # Output 1
+                    evt_engine.add_output(ext_sync.ext_out) # Output 0
 
                     evt_engine.map_events()
 
