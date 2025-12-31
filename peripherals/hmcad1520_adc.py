@@ -424,7 +424,7 @@ class HMCAD1520ADC(LiteXModule):
                 ]
                 gearbox_cases[2] = [
                     adc_source.data[((16*i)):(16*(i+1)-4)].eq(d12_gear.source.data),
-                    {adc_source.data[16*(i+1)-4+j].eq(0) for j in range(4)},
+                    {adc_source.data[16*(i+1)-j].eq(d12_gear.source.data[11]) for j in range(1,5)},
                     adc_source.valid.eq(d12_gear.source.valid)
                 ]
 
