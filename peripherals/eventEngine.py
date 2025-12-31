@@ -10,12 +10,12 @@ from migen.genlib.resetsync import AsyncResetSynchronizer
 from migen.genlib.misc import WaitTimer
 from migen.genlib.cdc import MultiReg
 from migen.genlib.coding import PriorityEncoder
+from migen.genlib.fifo import SyncFIFOBuffered
 
 from litex.gen import *
 
 from litex.soc.interconnect.csr import *
 from litex.soc.interconnect import stream
-from litex.soc.interconnect.stream import *
 
 event_layout = [("data", 64), ("type", 4), ("reserved", 4)]
 
@@ -28,64 +28,52 @@ class EventFIFO(LiteXModule):
         self.eventData = stream.Endpoint(event_layout)
         
         _flush_holdoff = Signal()
-        _eventReader = stream.Endpoint(event_layout)
-        _eventFifo = stream.SyncFIFO(layout=event_layout, depth=1024, buffered=True)
+        self.eventfifo = _eventFifo = SyncFIFOBuffered(width=68, depth=1024)
 
         self._readsource = CSRStatus(fields=[
-            CSRField("source", offset=0, size=4, description="Event Source ID"),
-            CSRField("reserved", offset=4, size=4, description="Reserved")
+            CSRField("source", offset=0, size=4, description="Event Source ID")
         ])
         self._readmarker = CSRStatus(64, description="Sample Counter where event ocurred")
 
         # Input from signal gets pushed to fifo
         self.comb += [
-            _eventFifo.sink.connect(self.eventData),
-            _eventFifo.sink.valid.eq(self.eventData.valid & ~_flush_holdoff)
+            self.eventData.ready.eq(_eventFifo.writable),
+            _eventFifo.we.eq(self.eventData.valid & self.eventData.ready & ~_flush_holdoff),
+            _eventFifo.din[0:64].eq(self.eventData.data),
+            _eventFifo.din[64:68].eq(self.eventData.type)
         ]
 
         # Register reads output from FIFO
-        self.sync += _eventReader.connect(_eventFifo.source)
+        self.sync += [
+            If(_eventFifo.readable,
+                self._readmarker.status.eq(_eventFifo.dout[0:64]),
+                self._readsource.fields.source.eq(_eventFifo.dout[64:68])
+            )
+        ]
 
         # FIFO data is read across 3 32-bit registers, register all values when the first one is read
         self.comb += [
-            self._readsource.fields.source.eq(_eventReader.type),
-        ]
-
-        self.sync += [
-            If(self._readsource.we,
-                self._readmarker.status.eq(_eventReader.data),
-                _eventReader.ready.eq(1),
-                self.eventAvailable.eq(0)
-            ).Elif(
-                _eventReader.ready &
-                _eventFifo.source.valid &
-                ~_flush_holdoff,
-                _eventReader.ready.eq(0),
-                self.eventAvailable.eq(1)
-            )
+            self.eventAvailable.eq(_eventFifo.readable),
+            _eventFifo.re.eq(self._readsource.we | _flush_holdoff)
         ]
 
         # Flush Event FIFO FSM
-        flush_fsm = FSM(reset_state="IDLE")
+        self.flush_fsm = flush_fsm = FSM(reset_state="IDLE")
 
         flush_fsm.act("IDLE",
-            _flush_holdoff.eq(0),
+            NextValue(_flush_holdoff, 0),
             NextState("IDLE"),
             If(self.flush,
-               NextState("FLUSH"),
-                _flush_holdoff.eq(1),
+                NextState("FLUSH"),
+                NextValue(_flush_holdoff, 1)
             )
         )
         flush_fsm.act("FLUSH",
-            _flush_holdoff.eq(1),
-            If(~_eventFifo.source.valid,
+            NextValue(_flush_holdoff, 1),
+            NextState("FLUSH"),
+            If(~_eventFifo.readable,
                 NextState("IDLE"),
-                NextValue(_eventReader.ready, 0),
                 NextValue(_flush_holdoff, 0)
-            ).Else(
-                NextState("FLUSH"),
-                NextValue(_flush_holdoff, 1),
-                NextValue(_eventReader.ready, 1), # Pull data out
             )
         )
 
@@ -138,9 +126,7 @@ class EventEngine(LiteXModule):
         self._outputs.append(output)
 
     def map_events(self):
-        self.comb += [
-            self.input_encoder.i.eq(Cat(self._inputs) & self._control.fields.in_en_mask)
-        ]
+        self.comb += self.input_encoder.i.eq(Cat(self._inputs) & self._control.fields.in_en_mask)
 
         self.sync += [
             If(~self._event_active,
@@ -171,34 +157,38 @@ class EventGenerator(LiteXModule):
         # Event can be set immediately or periodically on a timer
         evt_trigger = Signal()
         evt_periodic_valid = Signal()
-        evt_counter = Signal(32)
-        evt_timer = WaitTimer(int((1e-6)*sys_clk_freq)) # 1us Timer
+        self.evt_counter = evt_counter = Signal(32)
+        self.evt_timer = evt_timer = WaitTimer(int((1e-6)*sys_clk_freq)) # 1us Timer
+        _evt_periodic_last = Signal()
 
-        self.comb += evt_periodic_valid.eq(self._control.fields.periodic & (self._timeout.storage > 0))
+        self.comb += [
+            evt_periodic_valid.eq(self._control.fields.periodic & (self._timeout.storage > 0)),
+            self.event.eq(self._control.fields.immediate | evt_trigger)
+        ]
 
         self.sync += [
-            evt_trigger.eq(evt_periodic_valid & (evt_counter == 0)),
+            If(~_evt_periodic_last & evt_periodic_valid, # Rising Edge Detect
+                evt_counter.eq(self._timeout.storage)
+            ),
+            evt_trigger.eq(evt_periodic_valid & (evt_counter == 0) & evt_timer.done),
             evt_timer.wait.eq(~evt_timer.done & evt_periodic_valid),
             If(evt_timer.done,
                 If(evt_counter == 0,
-                   evt_counter.eq(self._timeout.storage - 1)
-                ).Else(
+                   evt_counter.eq(self._timeout.storage)
+                ).Elif(evt_timer.wait,
                     evt_counter.eq(evt_counter - 1)
                 )
             ),
-            self.event.eq(
-                self._control.fields.immediate |
-                evt_trigger
-            )
+            _evt_periodic_last.eq(evt_periodic_valid),
         ]
 
 class ExternalSync(LiteXModule):
     def __init__(self, pads=None, sys_clk_freq=100e6):
         self.ext_in = Signal()
         self.ext_out = Signal()
+        self._out_pulse = _out_pulse = Signal()
 
         _in_unfiltered = Signal()
-        _out_pulse = Signal()
         _ext_out_last = Signal()
 
         self._control  = CSRStorage(2, description="Sync Tristate(s) Control. Valid Values are:"\
@@ -222,12 +212,12 @@ class ExternalSync(LiteXModule):
         self.specials += MultiReg(i=_in_unfiltered, o=self.ext_in)
 
         # Set Output Pulse Width
-        pulse_counter = Signal(20)
-        pulse_timer = WaitTimer(int((1e-6)*sys_clk_freq)) # 1us Timer
+        self.pulse_counter = pulse_counter = Signal(20)
+        self.pulse_timer = pulse_timer = WaitTimer(int((1e-6)*sys_clk_freq)) # 1us Timer
 
         self.sync += [
             pulse_timer.wait.eq(~pulse_timer.done & _out_pulse),
-            If((_ext_out_last == 0) & self.ext_out, # Rising edge detect
+            If(~_ext_out_last & self.ext_out, # Rising edge detect
                 pulse_counter.eq(self._pulse_len.storage),
                 _out_pulse.eq(1),
                 pulse_timer.wait.eq(1),
