@@ -215,10 +215,10 @@ a7_thunderscope_rev5 = [
         Subsignal("rst_n", Pins("U9"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")),
         Subsignal("clk_p", Pins("B6")),
         Subsignal("clk_n", Pins("B5")),
-        Subsignal("rx_p",  Pins("E4 A4 C4 G4")),
-        Subsignal("rx_n",  Pins("E3 A3 C3 G3")),
-        Subsignal("tx_p",  Pins("H2 F2 D2 B2")),
-        Subsignal("tx_n",  Pins("H1 F1 D1 B1")),
+        Subsignal("rx_p",  Pins("G4 C4 A4 E4")),
+        Subsignal("rx_n",  Pins("G3 C3 A3 E3")),
+        Subsignal("tx_p",  Pins("B2 D2 F2 H2")),
+        Subsignal("tx_n",  Pins("B1 D1 F1 H1")),
     ),
 
     # Frontend.
