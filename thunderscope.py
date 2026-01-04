@@ -421,6 +421,7 @@ class BaseSoC(SoCMini):
                             ("``0b0``", "ADC in operational mode."),
                             ("``0b1``", "ADC in power-down mode."),
                         ]),
+                        CSRField("count_reset", offset=8, size=1, pulse=True, description="Reset the ADC Sample Counter")
                     ])
                    
                     self._status = CSRStatus(fields=[
@@ -480,7 +481,7 @@ class BaseSoC(SoCMini):
                     # Captured Sample Counter
                     self.sample_count = sample_count = Signal(64)
                     self.sync += [
-                        If(self._status.fields.frame_sync,
+                        If(~self._control.fields.count_reset,
                            If(self.source.ready & self.source.valid,
                                 sample_count.eq(sample_count + 1)
                             )
