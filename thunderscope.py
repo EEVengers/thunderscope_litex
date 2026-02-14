@@ -524,13 +524,45 @@ class BaseSoC(SoCMini):
                     self.submodules.ext_sync = ext_sync = ExternalSync(pads=platform.request("sync"), sys_clk_freq=sys_clk_freq)
 
                     evt_engine.add_input(evt_gen.event) # Input 0
-                    evt_engine.add_input(ext_sync.ext_in) # Input 1
-
-                    evt_engine.add_output(ext_sync.ext_out) # Output 0
-
-                    evt_engine.map_events()
 
             self.submodules.events = Events(sys_clk_freq, self.adc.sample_count)
+
+            # TODO: Ext_Out should route through ADC module to sync pulse with frame clock
+            self.events.engine.add_output(self.events.ext_sync.ext_out) # Output 0
+
+            # TODO: Ensure Capture of sample count when a SW event fires
+
+            # Sample External Sync from ADC Clk Domain
+            self.adc.hmcad1520.add_side_channel(side_channels = [self.events.ext_sync.ext_in_unfilt])
+            self.comb += self.adc.hmcad1520.side_source.ready.eq(1)
+
+            # Get Sync transition offset
+            self.events.submodules.adc_encoder = adc_enc = PriorityEncoder(16)
+            self.comb += adc_enc.i.eq(self.adc.hmcad1520.side_source.data)
+            ext_evt_in = Signal()
+            adjust_latch = Signal(4)
+            self.sync += [
+                # Drive Ext Event Input
+                If(self.adc.hmcad1520.side_source.valid,
+                    # Latch first offset of event
+                    If((ext_evt_in == 0) & ~adc_enc.n,
+                        adjust_latch.eq(adc_enc.o),
+                    ),
+                    ext_evt_in.eq(~adc_enc.n)
+                ).Else(
+                    ext_evt_in.eq(ext_evt_in)
+                )
+            ]
+            self.comb += [
+                self.events.engine.adj.eq(adjust_latch),
+                # Update this status signal when we have a valid event
+                self.events.ext_sync.ext_in.eq(ext_evt_in)
+            ]
+            
+            # Map the External Sync to the Event Engine when valid
+            self.events.engine.add_input(ext_evt_in) # Input 1
+            self.events.engine.map_events()
+
 
         # Analyzer -----------------------------------------------------------------------------
 

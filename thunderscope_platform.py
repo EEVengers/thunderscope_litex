@@ -309,11 +309,11 @@ a7_thunderscope_rev5 = [
 
 class ThunderscopePlatform(Xilinx7SeriesPlatform):
     device_list = {
-        "a100t" : {"fpga": "xc7a100tfgg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a100t.bit", "multiboot_addr": 0x100_0000, "multiboot_end": 0x1B0_0000, "flash_size": 32, "cfgbvs": "VCCO", "config": "3.3"},
-        "a200t" : {"fpga": "xc7a200tfbg484-2", "io": a7_484_io, "flash": "bscan_spi_xc7a200t.bit", "multiboot_addr": 0x100_0000, "multiboot_end": 0x1B0_0000, "flash_size": 32, "cfgbvs": "VCCO", "config": "3.3"},
-        "a50t"  : {"fpga": "xc7a50tcsg325-2",  "io": a7_325_io, "flash": "bscan_spi_xc7a50t.bit", "multiboot_addr": 0x40_0000, "multiboot_end": 0x68_0000, "flash_size": 8, "cfgbvs": "GND", "config": "1.8"},
-        "dev"   : {"fpga": "xc7a50tcsg325-2",  "io": a7_thunderscope_rev5, "flash": "bscan_spi_xc7a60t.bit", "multiboot_addr": 0x40_0000, "multiboot_end": 0x68_0000, "flash_size": 8, "cfgbvs": "VCCO", "config": "3.3"},
-        "prod"  : {"fpga": "xc7a35tcsg325-2",  "io": a7_thunderscope_rev5, "flash": "bscan_spi_xc7a60t.bit", "multiboot_addr": 0x40_0000, "multiboot_end": 0x68_0000, "flash_size": 8, "cfgbvs": "VCCO", "config": "3.3"},
+        "a100t" : {"fpga": "xc7a100tfgg484-2", "io": a7_484_io, "multiboot_addr": 0x100_0000, "multiboot_end": 0x1B0_0000, "flash_size": 32, "cfgbvs": "VCCO", "config": "3.3"},
+        "a200t" : {"fpga": "xc7a200tfbg484-2", "io": a7_484_io, "multiboot_addr": 0x100_0000, "multiboot_end": 0x1B0_0000, "flash_size": 32, "cfgbvs": "VCCO", "config": "3.3"},
+        "a50t"  : {"fpga": "xc7a50tcsg325-2",  "io": a7_325_io, "multiboot_addr": 0x40_0000, "multiboot_end": 0x68_0000, "flash_size": 8, "cfgbvs": "GND", "config": "1.8"},
+        "dev"   : {"fpga": "xc7a50tcsg325-2",  "io": a7_thunderscope_rev5, "multiboot_addr": 0x40_0000, "multiboot_end": 0x68_0000, "flash_size": 8, "cfgbvs": "VCCO", "config": "3.3"},
+        "prod"  : {"fpga": "xc7a35tcsg325-2",  "io": a7_thunderscope_rev5, "multiboot_addr": 0x40_0000, "multiboot_end": 0x68_0000, "flash_size": 8, "cfgbvs": "VCCO", "config": "3.3"},
     }
     def __init__(self, toolchain="vivado", variant="dev"):
 

@@ -526,3 +526,121 @@ class HMCAD1520ADC(LiteXModule):
             ),
         ]
 
+    def add_side_channel(self, side_channels, clock_domain="sys"):
+
+        # Side Channel Capture
+        #-----------------------
+        self.side_source = side_source = stream.Endpoint([("data", len(side_channels)*16)])
+
+        ## Internal Stream
+        self.side_channel_data = side_channel_data = stream.Endpoint([("data", len(side_channels)*16)])
+        
+        for (sig_idx, sig_in) in enumerate(side_channels):
+            d_delayed  = Signal()
+            d          = Signal(8)
+
+            self.specials += [
+                Instance("IDELAYE2",
+                    p_DELAY_SRC             = "IDATAIN",
+                    p_SIGNAL_PATTERN        = "DATA",
+                    p_CINVCTRL_SEL          = "FALSE",
+                    p_HIGH_PERFORMANCE_MODE = "TRUE",
+                    p_REFCLK_FREQUENCY      = 200.0,
+                    p_PIPE_SEL              = "FALSE",
+                    p_IDELAY_TYPE           = "VARIABLE",
+                    p_IDELAY_VALUE          = 0,
+
+                    i_C        = ClockSignal("sys"),
+                    i_LD       = self._control.fields.delay_rst,
+                    i_CE       = self._control.fields.delay_inc,
+                    i_LDPIPEEN = 0,
+                    i_INC      = 1,
+
+                    i_IDATAIN  = sig_in,
+                    o_DATAOUT  = d_delayed
+                ),
+                Instance("ISERDESE2",
+                    p_DATA_WIDTH     = 8,
+                    p_DATA_RATE      = "DDR",
+                    p_SERDES_MODE    = "MASTER",
+                    p_INTERFACE_TYPE = "NETWORKING",
+                    p_NUM_CE         = 1,
+                    p_IOBDELAY       = "IFD",
+                    i_DDLY    = d_delayed,
+                    i_CE1     = 1,
+                    i_RST     =  ResetSignal("adc_frame"),
+                    i_CLK     =  ClockSignal("adc"),
+                    i_CLKB    = ~ClockSignal("adc"),
+                    i_CLKDIV  =  ClockSignal("adc_frame"),
+                    i_BITSLIP = self.bitslip,
+                        **{f"o_Q{n+1}": d[8-1-n] for n in range(8)},
+                )
+            ]
+
+            # If 8-bit mode, pack 2 samples into 16 bits.
+            d8_gear = stream.Gearbox(i_dw=8, o_dw=16, msb_first=False)
+            d8_gear = ClockDomainsRenamer("adc_frame")(d8_gear)
+            d8_gear = ResetInserter()(d8_gear)
+
+            d12_gear = EightTwelve()
+            d12_gear = ClockDomainsRenamer("adc_frame")(d12_gear)
+
+            self.submodules += d8_gear
+            self.submodules += d12_gear
+
+            self.comb += [
+                d8_gear.sink.data.eq(d),
+                d12_gear.sink.eq(d),
+                d8_gear.source.ready.eq(1),
+                d8_gear.sink.valid.eq(1),
+                d12_gear.sink_valid.eq(self.frame_valid)
+            ]
+
+            self.sync.adc_frame += [
+                If(self.width_bits == 0,
+                    side_channel_data.data[16*sig_idx:16*(sig_idx+1)].eq(d8_gear.source.data[0:16]),
+                    side_channel_data.valid.eq(d8_gear.source.valid)
+                ).Else(
+                    # Compress 12 to 8, preserving any transitions
+                    # [1:0] <= [2:0]
+                    # [0] <= (2' & 1) | (2' & 0) | (1 & 0)
+                    # [1] <= [2]
+                    {side_channel_data.data[16*sig_idx+2*j].eq(
+                            (~d12_gear.source.data[(3*j)+2] & (d12_gear.source.data[(3*j)])) |
+                            (~d12_gear.source.data[(3*j)+2] & d12_gear.source.data[(3*j)+1]) |
+                            (d12_gear.source.data[(3*j)+1] & d12_gear.source.data[(3*j)])
+                        ) for j in range(0,4)},
+                    {side_channel_data.data[(16*sig_idx)+(2*j)+1].eq(
+                            (d12_gear.source.data[(3*j)+2])
+                        ) for j in range(0,4)},
+                    # Pad upper bits zero
+                    {side_channel_data.data[16*(sig_idx+1)-j].eq(0) for j in range(1,5)},
+                    side_channel_data.valid.eq(d12_gear.source.valid)
+                ),
+                d8_gear.reset.eq(~self.frame_valid)
+            ]
+
+
+        # Clock Domain Crossing.
+        # ----------------------
+
+        self.side_channel_cdc = stream.ClockDomainCrossing(
+            layout   = [("data", len(side_channels)*16)],
+            cd_from  = "adc_frame",
+            cd_to    = clock_domain,
+            buffered = True,
+            depth=8
+        )
+
+        # Keep side channel aligned with ADC samples being shuffled
+        self.side_channel_delay = stream.Delay(
+            layout = [("data", len(side_channels)*16)],
+            n      = 4
+        )
+
+        self.submodules += stream.Pipeline(
+                            self.side_channel_data,
+                            self.side_channel_cdc,
+                            self.side_channel_delay,
+                            self.side_source
+                        )

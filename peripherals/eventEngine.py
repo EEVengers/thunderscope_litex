@@ -17,7 +17,7 @@ from litex.gen import *
 from litex.soc.interconnect.csr import *
 from litex.soc.interconnect import stream
 
-event_layout = [("data", 64), ("type", 4), ("reserved", 4)]
+event_layout = [("data", 64), ("type", 4), ("adj", 4)]
 
 _EVENT_IN_OUT_MAX = 12
 
@@ -28,10 +28,11 @@ class EventFIFO(LiteXModule):
         self.eventData = stream.Endpoint(event_layout)
         
         _flush_holdoff = Signal()
-        self.eventfifo = _eventFifo = SyncFIFOBuffered(width=68, depth=1024)
+        self.eventfifo = _eventFifo = SyncFIFOBuffered(width=72, depth=1024)
 
         self._readsource = CSRStatus(fields=[
-            CSRField("source", offset=0, size=4, description="Event Source ID")
+            CSRField("source", offset=0, size=4, description="Event Source ID"),
+            CSRField("adjust", offset=8, size=8, description="Sub-frame sample alignment")
         ])
         self._readmarker = CSRStatus(64, description="Sample Counter where event ocurred")
 
@@ -40,14 +41,16 @@ class EventFIFO(LiteXModule):
             self.eventData.ready.eq(_eventFifo.writable),
             _eventFifo.we.eq(self.eventData.valid & self.eventData.ready & ~_flush_holdoff),
             _eventFifo.din[0:64].eq(self.eventData.data),
-            _eventFifo.din[64:68].eq(self.eventData.type)
+            _eventFifo.din[64:68].eq(self.eventData.type),
+            _eventFifo.din[68:72].eq(self.eventData.adj)
         ]
 
         # Register reads output from FIFO
         self.sync += [
             If(_eventFifo.readable,
                 self._readmarker.status.eq(_eventFifo.dout[0:64]),
-                self._readsource.fields.source.eq(_eventFifo.dout[64:68])
+                self._readsource.fields.source.eq(_eventFifo.dout[64:68]),
+                self._readsource.fields.adjust.eq(_eventFifo.dout[68:72])
             )
         ]
 
@@ -79,13 +82,21 @@ class EventFIFO(LiteXModule):
 
 
 class EventEngine(LiteXModule):
-    def __init__(self, marker=None):
+    def __init__(self, marker=None, adjustment=None):
         self.en = Signal() # Global Event Enable
         self._inputs = []
         self._outputs = []
         self._event_active = Signal()
         self._event_pulse = Signal()
         self.input_encoder = PriorityEncoder(_EVENT_IN_OUT_MAX)
+
+        if marker is None:
+            marker = Signal(64)
+        
+        if adjustment is None:
+            self.adj = adjustment = Signal(4)
+        else:
+            self.adj = adjustment
 
         self._control = CSRStorage(fields=[
             CSRField("in_en_mask", offset=0, size=_EVENT_IN_OUT_MAX, description="Mask for enabled Input Signals."),
@@ -113,7 +124,7 @@ class EventEngine(LiteXModule):
         self.comb += [
             _fifo.eventData.data.eq(marker),
             _fifo.eventData.type.eq(self.input_encoder.o),
-            _fifo.eventData.reserved.eq(0),
+            _fifo.eventData.adj.eq(adjustment),
             _fifo.eventData.valid.eq(self._event_pulse)
         ]
 
@@ -187,8 +198,8 @@ class ExternalSync(LiteXModule):
         self.ext_in = Signal()
         self.ext_out = Signal()
         self._out_pulse = _out_pulse = Signal()
+        self.ext_in_unfilt = _in_unfiltered = Signal()
 
-        _in_unfiltered = Signal()
         _ext_out_last = Signal()
 
         self._control  = CSRStorage(2, description="Sync Tristate(s) Control. Valid Values are:"\
@@ -207,9 +218,6 @@ class ExternalSync(LiteXModule):
             self._status.fields.evt_in.eq(self.ext_in),
             self._status.fields.evt_out.eq(self.ext_out)
         ]
-
-        # Synchronize Input Signal
-        self.specials += MultiReg(i=_in_unfiltered, o=self.ext_in)
 
         # Set Output Pulse Width
         self.pulse_counter = pulse_counter = Signal(20)
@@ -262,12 +270,14 @@ class ExternalSync(LiteXModule):
                 ]
             else:
                 # This is to support Beta units with a single Tri-state pin sync
-                io = TSTriple()
-                self.specials += io.get_tristate(pads)
+                pin_ctl = Signal()
+                self.specials += Instance("IOBUF",
+                                    i_IO = pads,
+                                    i_I  = _out_pulse,
+                                    i_T  = pin_ctl,
+                                    o_O  = _in_unfiltered)
                 self.comb += [
-                    _in_unfiltered.eq(io.i),
-                    io.o.eq(_out_pulse),
-                    If(self._control.storage == 0b10,
-                       io.oe.eq(1)
-                    ).Else(io.oe.eq(0))
+                    If(self._control.storage == 0b01,
+                       pin_ctl.eq(1)
+                    ).Else(pin_ctl.eq(0))
                 ]
