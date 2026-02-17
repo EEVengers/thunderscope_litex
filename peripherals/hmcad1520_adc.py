@@ -164,8 +164,8 @@ class HMCAD1520ADC(LiteXModule):
         # ---------
 
         if pads is not None:
-            self.clock_domains.cd_adc       = ClockDomain() # ADC Bitclock.
-            self.clock_domains.cd_adc_frame = ClockDomain() # ADC Frameclock (freq : ADC Bitclock/4).
+            self.cd_adc       = ClockDomain() # ADC Bitclock.
+            self.cd_adc_frame = ClockDomain() # ADC Frameclock (freq : ADC Bitclock/4).
             adc_clk = Signal()
             self.specials += Instance("IBUFDS",
                 i_I  = pads.lclk_p,
@@ -442,8 +442,7 @@ class HMCAD1520ADC(LiteXModule):
             layout   = [("data", nchannels*16)],
             cd_from  = "adc_frame",
             cd_to    = clock_domain,
-            buffered = True,
-            depth=8
+            buffered = True
         )
 
         # Shuffler.
@@ -628,19 +627,11 @@ class HMCAD1520ADC(LiteXModule):
             layout   = [("data", len(side_channels)*16)],
             cd_from  = "adc_frame",
             cd_to    = clock_domain,
-            buffered = True,
-            depth=8
-        )
-
-        # Keep side channel aligned with ADC samples being shuffled
-        self.side_channel_delay = stream.Delay(
-            layout = [("data", len(side_channels)*16)],
-            n      = 4
+            buffered = True
         )
 
         self.submodules += stream.Pipeline(
                             self.side_channel_data,
                             self.side_channel_cdc,
-                            self.side_channel_delay,
                             self.side_source
                         )

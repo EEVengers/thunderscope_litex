@@ -366,7 +366,4 @@ class ThunderscopePlatform(Xilinx7SeriesPlatform):
             raise ValueError("Unknown FPGA Variant for flashing", variant)
 
     def do_finalize(self, fragment):
-        Xilinx7SeriesPlatform.do_finalize(self, fragment)
-        self.add_period_constraint(self.lookup_request("adc_data:lclk_p", loose=True), 1e9/500e6)
-        self.add_false_path_constraint(self.lookup_request("adc_data:lclk_p", loose=True), self.lookup_request("sys:clk", loose=True))
-        
+        Xilinx7SeriesPlatform.do_finalize(self, fragment)        

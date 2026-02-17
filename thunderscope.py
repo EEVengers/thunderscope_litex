@@ -209,6 +209,8 @@ class BaseSoC(SoCMini):
         # JTAGBone ---------------------------------------------------------------------------------
         if with_jtagbone:
             self.add_jtagbone()
+            platform.add_period_constraint(self.jtagbone.phy.cd_jtag.clk, 1e9/20e6)
+            platform.add_false_path_constraints(self.jtagbone.phy.cd_jtag.clk, self.crg.cd_sys.clk)
 
         # XADC -------------------------------------------------------------------------------------
         self.submodules.xadc = XADC()
@@ -216,6 +218,7 @@ class BaseSoC(SoCMini):
         # DNA --------------------------------------------------------------------------------------
         self.submodules.dna = DNA()
         self.dna.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
+        platform.add_false_path_constraints(self.dna.cd_dna.clk, self.crg.cd_sys.clk)
 
         # PCIe -------------------------------------------------------------------------------------
         self.submodules.pcie_phy = S7PCIEPHY(platform, platform.request("pcie_x4"),
@@ -228,6 +231,20 @@ class BaseSoC(SoCMini):
         })
         self.add_pcie(phy=self.pcie_phy, ndmas=1, dma_buffering_depth=1024*16,
                       max_pending_requests=4, address_width=64)
+        
+        # Timings False Paths.
+        # --------------------
+        platform.toolchain.pre_placement_commands.append("set_false_path -from [get_pins main_s7pciephy_pclk_sel_reg/C] -to [get_pins BUFGCTRL/S1]")
+        false_paths = [
+            ("{{*s7pciephy_clkout0}}", "{{*crg_*clkout0}}"),
+            ("{{*s7pciephy_clkout1}}", "{{*crg_*clkout0}}"),
+            ("{{*s7pciephy_clkout3}}", "{{*crg_*clkout0}}"),
+            ("{{*s7pciephy_clkout*}}", "{{sys_clk}}"),
+            ("{{*s7pciephy_clkout0}}", "{{*s7pciephy_clkout1}}")
+        ]
+        for clk0, clk1 in false_paths:
+            platform.toolchain.pre_placement_commands.append(f"set_false_path -from [get_clocks {clk0}] -to [get_clocks {clk1}]")
+            platform.toolchain.pre_placement_commands.append(f"set_false_path -from [get_clocks {clk1}] -to [get_clocks {clk0}]")
 
 
         # SPI Flash --------------------------------------------------------------------------------
@@ -275,6 +292,7 @@ class BaseSoC(SoCMini):
         self.submodules.icap = ICAP()
         self.icap.add_reload()
         self.icap.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
+        platform.add_false_path_constraints(self.icap.cd_icap.clk, self.crg.cd_sys.clk)
 
         # Frontend / ADC ---------------------------------------------------------------------------
 
@@ -513,6 +531,10 @@ class BaseSoC(SoCMini):
 
             # ADC -> PCIe.
             self.sync += self.adc.source.connect(self.pcie_dma0.sink)
+
+            # ADC Timing Constraints
+            self.platform.add_false_path_constraints(self.adc.hmcad1520.cd_adc_frame.clk, self.crg.cd_sys.clk)
+            self.platform.add_period_constraint(self.adc.hmcad1520.cd_adc_frame.clk, 1e9/125e6)
 
         # Event Subsystem ----------------------------------------------------------------------
 
