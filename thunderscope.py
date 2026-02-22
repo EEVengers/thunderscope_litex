@@ -227,6 +227,9 @@ class BaseSoC(SoCMini):
         )
         self.pcie_phy.config.update({
             "Vendor_ID": "20A7",
+            # [15..12] Category 0, first used for EEVengers devices
+            # [11.. 8] Class of Device, 1: Oscilloscope, others TBD
+            # [ 7.. 0] Unique product index, 01 for ThunderScope
             "Device_ID": "0101"
         })
         self.add_pcie(phy=self.pcie_phy, ndmas=1, dma_buffering_depth=1024*16,
@@ -276,7 +279,7 @@ class BaseSoC(SoCMini):
                            rate="1:1", with_mmap=True, with_master=True, with_mmap_write="csr")
 
         # # QSPI Flash Adapter -----------------------------------------------------------------------
-        pcie_translated = wishbone.Interface(bursting=True)
+        pcie_translated = wishbone.Interface.like(self.bus.masters["pcie_mmap"])
         pcie_wb = self.bus.masters["pcie_mmap"]
 
         self.submodules.flash_adapter = WindowRemapper(
