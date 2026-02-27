@@ -607,6 +607,7 @@ def main():
     from litex.build.parser import LiteXArgumentParser
     parser = LiteXArgumentParser(platform=ThunderscopePlatform, description="LitePCIe SoC on ThunderScope")
     target_group = parser.add_argument_group(title="Target options")
+    target_group.add_argument("--gen",       action="store_true", help="Generate project Verilog sources")
     target_group.add_argument("--variant",   default="dev",     help="Board variant [prod, dev, a200t, a100t, a50t].")
     target_group.add_argument("--flash",     action="store_true", help="Flash bitstream.")
     target_group.add_argument("--driver",    action="store_true", help="Generate PCIe driver.")
@@ -621,10 +622,15 @@ def main():
     soc = BaseSoC(variant = args.variant, **parser.soc_argdict)
 
     builder  = Builder(soc,  **parser.builder_argdict)
+
     os.makedirs(builder.gateware_dir, exist_ok=True)
     shutil.copyfile(f"bin/barrierA.bin", f"{builder.gateware_dir}/barrierA.bin")
     shutil.copyfile(f"bin/barrierB.bin", f"{builder.gateware_dir}/barrierB.bin")
-    builder.build(run=args.build)
+
+    if args.build:
+        builder.build(run=True)
+    elif args.gen:
+        builder.build(run=False)
 
     # Generate LitePCIe Driver.
     if args.driver:

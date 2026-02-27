@@ -27,6 +27,9 @@ ALL_VARIANTS=$(RELEASE_VARIANTS) $(BETA_VARIANTS)
 # LiteX Generate-only targets
 GEN_VARIANTS=$(patsubst %,gen-%, $(ALL_VARIANTS))
 
+# LiteX JTAG Load-only targets
+LOAD_VARIANTS=$(patsubst %,load-%, $(ALL_VARIANTS))
+
 # Paths to use for building
 BUILD_PATH:= build
 DIST_PATH:= distrib
@@ -69,7 +72,6 @@ release: $(RELEASE_VARIANTS) docs driver
 
 all: $(ALL_VARIANTS) docs driver
 
-
 $(ALL_VARIANTS) : $(SOURCES) venv
 	$(VENV_ACTIVATE) && \
 	$(PY) $(PROJECT).py --variant=$@ --build --output-dir=$(BUILD_PATH)/$(PROJECT)_$@
@@ -86,8 +88,11 @@ gen: $(GEN_VARIANTS) venv
 
 $(GEN_VARIANTS): gen-% : $(SOURCES) venv
 	$(VENV_ACTIVATE) && \
-	$(PY) $(PROJECT).py --variant=$* --output-dir=$(BUILD_PATH)/$(PROJECT)_$*
+	$(PY) $(PROJECT).py --variant=$* --gen --output-dir=$(BUILD_PATH)/$(PROJECT)_$*
 
+$(LOAD_VARIANTS): load-% : $(SOURCES) venv
+	$(VENV_ACTIVATE) && \
+	$(PY) $(PROJECT).py --variant=$* --gen --output-dir=$(BUILD_PATH)/$(PROJECT)_$*
 
 driver: venv
 	$(VENV_ACTIVATE) && \
