@@ -92,7 +92,7 @@ $(GEN_VARIANTS): gen-% : $(SOURCES) venv
 
 $(LOAD_VARIANTS): load-% : $(SOURCES) venv
 	$(VENV_ACTIVATE) && \
-	$(PY) $(PROJECT).py --variant=$* --gen --output-dir=$(BUILD_PATH)/$(PROJECT)_$*
+	$(PY) $(PROJECT).py --variant=$* --load --output-dir=$(BUILD_PATH)/$(PROJECT)_$*
 
 driver: venv
 	$(VENV_ACTIVATE) && \

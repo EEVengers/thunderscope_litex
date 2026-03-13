@@ -416,7 +416,7 @@ class BaseSoC(SoCMini):
                 sys_clk_freq     = sys_clk_freq,
             )
 
-        # ADC.
+        # ADC
         if with_adc:
 
             class ADC(Module, AutoCSR):
@@ -492,12 +492,11 @@ class BaseSoC(SoCMini):
                     self.submodules.gate = stream.Gate([("data", data_width)], sink_ready_when_disabled=True)
                     self.comb += self.gate.enable.eq(self.trigger.enable)
 
-                    # Pipeline.
-                    self.submodules += stream.Pipeline(
-                        self.hmcad1520,
-                        self.gate,
-                        self.source
-                    )
+                    # ADC Pipeline.
+                    self.comb += [
+                        self.hmcad1520.source.connect(self.gate.sink),
+                        self.gate.source.connect(self.source)
+                    ]
 
                     # Captured Sample Counter
                     self.sample_count = sample_count = Signal(64)
@@ -540,8 +539,13 @@ class BaseSoC(SoCMini):
             self.platform.add_period_constraint(self.adc.hmcad1520.cd_adc_frame.clk, 1e9/125e6)
 
         # Event Subsystem ----------------------------------------------------------------------
-
         if with_events:
+            # Latch Marker value
+            count_latch = Signal(64)
+            self.sync += [
+                count_latch.eq(self.adc.sample_count)
+            ]
+
             class Events(LiteXModule):
                 def __init__(self, sys_clk_freq, marker=None):
                     self.submodules.engine = evt_engine = EventEngine(marker)
@@ -550,7 +554,7 @@ class BaseSoC(SoCMini):
 
                     evt_engine.add_input(evt_gen.event) # Input 0
 
-            self.submodules.events = Events(sys_clk_freq, self.adc.sample_count)
+            self.submodules.events = Events(sys_clk_freq, count_latch)
 
             # TODO: Ext_Out should route through ADC module to sync pulse with frame clock
             self.events.engine.add_output(self.events.ext_sync.ext_out) # Output 0
@@ -559,7 +563,6 @@ class BaseSoC(SoCMini):
 
             # Sample External Sync from ADC Clk Domain
             self.adc.hmcad1520.add_side_channel(side_channels = [self.events.ext_sync.ext_in_unfilt])
-            self.comb += self.adc.hmcad1520.side_source.ready.eq(1)
 
             # Get Sync transition offset
             self.events.submodules.adc_encoder = adc_enc = PriorityEncoder(16)
@@ -588,14 +591,13 @@ class BaseSoC(SoCMini):
             self.events.engine.add_input(ext_evt_in) # Input 1
             self.events.engine.map_events()
 
-
         # Analyzer -----------------------------------------------------------------------------
 
         if with_analyzer:
             analyzer_signals = [
             ]
             self.submodules.analyzer = LiteScopeAnalyzer(analyzer_signals,
-                depth        = 1024,
+                depth        = 512,
                 clock_domain = "sys",
                 samplerate   = sys_clk_freq,
                 csr_csv      = "test/analyzer.csv"

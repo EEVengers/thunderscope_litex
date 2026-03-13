@@ -19,7 +19,6 @@ from litex.gen import *
 from litex.soc.interconnect.csr import *
 from litex.soc.interconnect import stream
 
-from peripherals.spi import *
 from peripherals.downsampling import DownSampling
 from peripherals.byteShuffler import ByteShuffler
 
@@ -438,7 +437,7 @@ class HMCAD1520ADC(LiteXModule):
         # Clock Domain Crossing.
         # ----------------------
 
-        self.cdc = stream.ClockDomainCrossing(
+        self.adc_cdc = stream.ClockDomainCrossing(
             layout   = [("data", nchannels*16)],
             cd_from  = "adc_frame",
             cd_to    = clock_domain,
@@ -465,12 +464,12 @@ class HMCAD1520ADC(LiteXModule):
         # # -------------
         # self.submodules.downsampling = DownSampling(ratio=self._downsampling.storage)
 
-        self.submodules += stream.Pipeline(
-                                    self.adc_source,
-                                    self.cdc,
-                                    self.adc_shuffler,
-                                    self.source
-                                )
+        # Connect Data Pipeline
+        self.comb += [
+            self.adc_source.connect(self.adc_cdc.sink),
+            self.adc_cdc.source.connect(self.adc_shuffler.sink),
+            self.adc_shuffler.source.connect(self.source)
+        ]
         
         # Statistics.
         # -----------
@@ -622,7 +621,6 @@ class HMCAD1520ADC(LiteXModule):
 
         # Clock Domain Crossing.
         # ----------------------
-
         self.side_channel_cdc = stream.ClockDomainCrossing(
             layout   = [("data", len(side_channels)*16)],
             cd_from  = "adc_frame",
@@ -630,8 +628,18 @@ class HMCAD1520ADC(LiteXModule):
             buffered = True
         )
 
-        self.submodules += stream.Pipeline(
-                            self.side_channel_data,
-                            self.side_channel_cdc,
-                            self.side_source
-                        )
+        # Connect Side-Channel Pipeline
+        self.comb += [
+            self.side_channel_data.connect(self.side_channel_cdc.sink),
+            self.side_channel_cdc.source.connect(self.side_source)
+        ]
+
+        # Synchronize Event Sample with ADC Data
+        cdc_sync = Signal()
+        self.comb += [
+            cdc_sync.eq(self.side_channel_cdc.source.valid & self.adc_shuffler.source.valid),
+            self.source.ready.eq(cdc_sync),
+            self.source.valid.eq(cdc_sync),
+            self.side_source.ready.eq(cdc_sync),
+            self.side_source.valid.eq(cdc_sync),
+        ]
