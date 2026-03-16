@@ -194,10 +194,11 @@ class EventGenerator(LiteXModule):
         ]
 
 class ExternalSync(LiteXModule):
-    def __init__(self, pads=None, sys_clk_freq=100e6):
+    def __init__(self, pads=None, sys_clk_freq=100e6, sync_out_clk_domain=None):
         self.ext_in = Signal()
         self.ext_out = Signal()
         self._out_pulse = _out_pulse = Signal()
+        self._out_clk_sync = _out_clk_sync = Signal()
         self.ext_in_unfilt = _in_unfiltered = Signal()
 
         _ext_out_last = Signal()
@@ -240,6 +241,12 @@ class ExternalSync(LiteXModule):
             _ext_out_last.eq(self.ext_out)
         ]
 
+        # If a different output clock is required, sync here
+        if sync_out_clk_domain is not None:
+            self.specials += MultiReg(_out_pulse, _out_clk_sync, sync_out_clk_domain)
+        else:
+            self.comb += _out_clk_sync.eq(_out_pulse)
+
         if pads is not None:
             if hasattr(pads, "de"):
                 # Dev and Production units have a differential buffer for Sync I/O
@@ -250,7 +257,7 @@ class ExternalSync(LiteXModule):
                         o_O  = _in_unfiltered
                     ),
                     Instance("OBUFDS",
-                        i_I  = _out_pulse,
+                        i_I  = _out_clk_sync,
                         o_O  = pads.out_p,
                         o_OB = pads.out_n,
                     )
@@ -273,7 +280,7 @@ class ExternalSync(LiteXModule):
                 pin_ctl = Signal()
                 self.specials += Instance("IOBUF",
                                     i_IO = pads,
-                                    i_I  = _out_pulse,
+                                    i_I  = _out_clk_sync,
                                     i_T  = pin_ctl,
                                     o_O  = _in_unfiltered)
                 self.comb += [

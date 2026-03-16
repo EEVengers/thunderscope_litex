@@ -550,16 +550,15 @@ class BaseSoC(SoCMini):
                 def __init__(self, sys_clk_freq, marker=None):
                     self.submodules.engine = evt_engine = EventEngine(marker)
                     self.submodules.generator = evt_gen = EventGenerator(sys_clk_freq)
-                    self.submodules.ext_sync = ext_sync = ExternalSync(pads=platform.request("sync"), sys_clk_freq=sys_clk_freq)
+                    self.submodules.ext_sync = ext_sync = ExternalSync(pads=platform.request("sync"),
+                                                                       sys_clk_freq=sys_clk_freq,
+                                                                       sync_out_clk_domain="adc_frame")
 
                     evt_engine.add_input(evt_gen.event) # Input 0
 
             self.submodules.events = Events(sys_clk_freq, count_latch)
 
-            # TODO: Ext_Out should route through ADC module to sync pulse with frame clock
             self.events.engine.add_output(self.events.ext_sync.ext_out) # Output 0
-
-            # TODO: Ensure Capture of sample count when a SW event fires
 
             # Sample External Sync from ADC Clk Domain
             self.adc.hmcad1520.add_side_channel(side_channels = [self.events.ext_sync.ext_in_unfilt])
@@ -636,6 +635,7 @@ def main():
 
     # Generate LitePCIe Driver.
     if args.driver:
+        builder.build(run=False)
         generate_litepcie_software(soc, args.driver_dir)
 
     # Load Bistream.
