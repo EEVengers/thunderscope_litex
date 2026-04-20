@@ -12,7 +12,7 @@ from migen import *
 from migen.genlib.resetsync import AsyncResetSynchronizer
 
 from migen.genlib.misc import WaitTimer
-from migen.genlib.cdc import BusSynchronizer, PulseSynchronizer
+from migen.genlib.cdc import BusSynchronizer, PulseSynchronizer, MultiReg
 
 from litex.gen import *
 
@@ -247,11 +247,11 @@ class HMCAD1520ADC(LiteXModule):
             self.submodules += fclk_timer
             
             if(frame_polarity):
-                frame_valid_8 = 0xf0
-                frame_valid_12 = [0xc0, 0x0f, 0xfc]
+                self.frame_valid_8 = frame_valid_8 = 0xf0
+                self.frame_valid_12 = frame_valid_12 = [0xc0, 0x0f, 0xfc]
             else:
-                frame_valid_8 = 0x0f
-                frame_valid_12 = [0x3f, 0xf0, 0x03]
+                self.frame_valid_8 = frame_valid_8 = 0x0f
+                self.frame_valid_12 = frame_valid_12 = [0x3f, 0xf0, 0x03]
 
             self.sync.adc_frame += [
                 bitslip.eq(0),
@@ -524,7 +524,7 @@ class HMCAD1520ADC(LiteXModule):
             ),
         ]
 
-    def add_side_channel(self, side_channels, clock_domain="sys"):
+    def add_side_channel(self, side_channels=[], clock_domain="sys"):
 
         # Side Channel Capture
         #-----------------------
@@ -642,4 +642,149 @@ class HMCAD1520ADC(LiteXModule):
             self.source.valid.eq(cdc_sync),
             self.side_source.ready.eq(cdc_sync),
             self.side_source.valid.eq(cdc_sync),
+        ]
+
+    def add_sync_channel(self, sync_in=None, sync_out=None, sync_trigger=None, sync_sel=None, clock_domain="sys"):
+
+        # Side Channel Capture
+        #-----------------------
+        self.sync_source = stream.Endpoint([("data", 16)])
+
+        ## Internal Stream
+        sync_data = stream.Endpoint([("data",16)])
+
+        ## Sync Out Trigger
+        self.sync_out_trigger = sync_out_trigger = Signal()
+        self.specials += MultiReg(sync_trigger, sync_out_trigger, "adc_frame")
+
+        ## Sync Select
+        self.sync_select = sync_select = Signal()    
+        if sync_sel is not None:
+            self.specials += MultiReg(sync_sel, sync_select, "adc_frame")
+        else:
+            self.comb += sync_select.eq(0)
+
+        d_delayed  = Signal()
+        d          = Signal(8)
+
+        self.specials += [
+            Instance("IDELAYE2",
+                p_DELAY_SRC             = "IDATAIN",
+                p_SIGNAL_PATTERN        = "DATA",
+                p_CINVCTRL_SEL          = "FALSE",
+                p_HIGH_PERFORMANCE_MODE = "TRUE",
+                p_REFCLK_FREQUENCY      = 200.0,
+                p_PIPE_SEL              = "FALSE",
+                p_IDELAY_TYPE           = "VARIABLE",
+                p_IDELAY_VALUE          = 0,
+
+                i_C        = ClockSignal("sys"),
+                i_LD       = self._control.fields.delay_rst,
+                i_CE       = self._control.fields.delay_inc,
+                i_LDPIPEEN = 0,
+                i_INC      = 1,
+
+                i_IDATAIN  = sync_in,
+                o_DATAOUT  = d_delayed
+            ),
+            Instance("ISERDESE2",
+                p_DATA_WIDTH     = 8,
+                p_DATA_RATE      = "DDR",
+                p_SERDES_MODE    = "MASTER",
+                p_INTERFACE_TYPE = "NETWORKING",
+                p_NUM_CE         = 1,
+                p_IOBDELAY       = "IFD",
+                i_DDLY    = d_delayed,
+                i_CE1     = 1,
+                i_RST     =  ResetSignal("adc_frame"),
+                i_CLK     =  ClockSignal("adc"),
+                i_CLKB    = ~ClockSignal("adc"),
+                i_CLKDIV  =  ClockSignal("adc_frame"),
+                i_BITSLIP = self.bitslip,
+                    **{f"o_Q{n+1}": d[8-1-n] for n in range(8)},
+            )
+        ]
+
+        # If 8-bit mode, pack 2 samples into 16 bits.
+        d8_gear = stream.Gearbox(i_dw=8, o_dw=16, msb_first=False)
+        d8_gear = ClockDomainsRenamer("adc_frame")(d8_gear)
+        d8_gear = ResetInserter()(d8_gear)
+
+        d12_gear = EightTwelve()
+        d12_gear = ClockDomainsRenamer("adc_frame")(d12_gear)
+
+        self.submodules += d8_gear
+        self.submodules += d12_gear
+
+        self.comb += [
+            d8_gear.sink.data.eq(d),
+            d12_gear.sink.eq(d),
+            d8_gear.source.ready.eq(1),
+            d8_gear.sink.valid.eq(1),
+            d12_gear.sink_valid.eq(self.frame_valid)
+        ]
+
+        self.sync.adc_frame += [
+            If(self.width_bits == 0,
+                sync_data.data[0:16].eq(d8_gear.source.data[0:16]),
+                sync_data.valid.eq(d8_gear.source.valid)
+            ).Else(
+                # Compress 12 to 8, preserving any transitions
+                # [1:0] <= [2:0]
+                # [0] <= (2' & 1) | (2' & 0) | (1 & 0)
+                # [1] <= [2]
+                {sync_data.data[2*j].eq(
+                        (~d12_gear.source.data[(3*j)+2] & (d12_gear.source.data[(3*j)])) |
+                        (~d12_gear.source.data[(3*j)+2] & d12_gear.source.data[(3*j)+1]) |
+                        (d12_gear.source.data[(3*j)+1] & d12_gear.source.data[(3*j)])
+                    ) for j in range(0,4)},
+                {sync_data.data[(2*j)+1].eq(
+                        (d12_gear.source.data[(3*j)+2])
+                    ) for j in range(0,4)},
+                # Pad upper bits zero
+                {sync_data.data[16-j].eq(0) for j in range(1,5)},
+                sync_data.valid.eq(d12_gear.source.valid)
+            ),
+            d8_gear.reset.eq(~self.frame_valid)
+        ]
+
+        # Align Sync Out signal to valid ADC Frame edge
+        self.sync.adc_frame += If(((self.width_bits == 0) & (sync_data.valid == 1)) |
+                                    (self.fclk == self.frame_valid_12[-1]),
+                                    sync_out.eq(sync_out_trigger))
+
+        # Clock Domain Crossing.
+        # ----------------------
+        self.sync_cdc = stream.ClockDomainCrossing(
+            layout   = [("data", 16)],
+            cd_from  = "adc_frame",
+            cd_to    = clock_domain,
+            buffered = True
+        )
+
+        # Connect Side-Channel Pipeline
+        self.comb += [
+            sync_data.connect(self.sync_cdc.sink),
+            self.sync_cdc.source.connect(self.sync_source)
+        ]
+
+        self.comb += [
+            ## Force indiction of start of frame for sync outputs
+            If(sync_select == 1, 
+                If(sync_out == 1,
+                    self.sync_cdc.sink.data.eq(0xFF)
+                ).Else(
+                    self.sync_cdc.sink.data.eq(0x0000)
+                )
+            )
+        ]
+
+        # Synchronize Event Sample with ADC Data
+        cdc_sync = Signal()
+        self.comb += [
+            cdc_sync.eq(self.sync_cdc.source.valid & self.adc_shuffler.source.valid),
+            self.source.ready.eq(cdc_sync),
+            self.source.valid.eq(cdc_sync),
+            self.sync_source.ready.eq(cdc_sync),
+            self.sync_source.valid.eq(cdc_sync),
         ]

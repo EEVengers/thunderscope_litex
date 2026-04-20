@@ -86,8 +86,10 @@ class EventEngine(LiteXModule):
         self.en = Signal() # Global Event Enable
         self._inputs = []
         self._outputs = []
+        self._outputs_fb = []
         self._event_active = Signal()
         self._event_pulse = Signal()
+        self._marker_capture = Signal()
         self.input_encoder = PriorityEncoder(_EVENT_IN_OUT_MAX)
 
         if marker is None:
@@ -99,8 +101,12 @@ class EventEngine(LiteXModule):
             self.adj = adjustment
 
         self._control = CSRStorage(fields=[
-            CSRField("in_en_mask", offset=0, size=_EVENT_IN_OUT_MAX, description="Mask for enabled Input Signals."),
+            CSRField("in_en_mask",  offset=0,  size=_EVENT_IN_OUT_MAX, description="Mask for enabled Input Signals."),
             CSRField("out_en_mask", offset=16, size=_EVENT_IN_OUT_MAX, description="Mask for enabled Output Signals"),
+            CSRField("sync_sel",    offset=30, size=1, description="Select bit for Event synchronization", values=[
+                        (0, "Event Marker syncs to Input"),
+                        (1, "Event Marker syncs to Output Feedback")
+                    ]),
             CSRField("event_flush", offset=31, size=1, pulse=True, description="Clear any pending events in the Event FIFO")
         ])
 
@@ -125,36 +131,65 @@ class EventEngine(LiteXModule):
             _fifo.eventData.data.eq(marker),
             _fifo.eventData.type.eq(self.input_encoder.o),
             _fifo.eventData.adj.eq(adjustment),
-            _fifo.eventData.valid.eq(self._event_pulse)
+            _fifo.eventData.valid.eq(self._marker_capture)
         ]
 
     def add_input(self, input):
         assert type(input) is Signal
         self._inputs.append(input)
 
-    def add_output(self, output):
+    def add_output(self, output, output_fb=None):
         assert type(output) is Signal
+        if output_fb is None:
+            self._outputs_fb.append(output)
+        else:
+            self._outputs_fb.append(output_fb)
         self._outputs.append(output)
 
     def map_events(self):
-        self.comb += self.input_encoder.i.eq(Cat(self._inputs) & self._control.fields.in_en_mask)
+        self._input_vec = Signal(len(self._inputs))
+        self._output_vec = Signal(len(self._outputs))
+        self._output_fb_vec = Signal(len(self._outputs_fb))
+
+        self.comb += [
+            self._input_vec.eq(Cat(self._inputs)),
+            Cat(self._outputs).eq(self._output_vec),
+            self._output_fb_vec.eq(Cat(self._outputs_fb)),
+            self.input_encoder.i.eq(self._input_vec & self._control.fields.in_en_mask)
+        ]
 
         self.sync += [
             If(~self._event_active,
                 If(~self.input_encoder.n,
                     self._event_active.eq(1),
-                    Cat(self._outputs).eq(self._control.fields.out_en_mask),
                     self._event_pulse.eq(1),
-                ),
+                )
             ).Else(
                 If(self.input_encoder.n,
                     self._event_active.eq(0)
                 ),
-                Cat(self._outputs).eq(0),
                 self._event_pulse.eq(0)
             )
         ]
-    
+
+        self.comb += [
+            If(self._control.fields.sync_sel == 0,
+                self._marker_capture.eq(self._event_pulse)    
+            ).Else(
+                # Output_Vec and Output_FB_Vec will only match for one cycle
+                self._marker_capture.eq((self._output_vec & self._output_fb_vec & self._control.fields.out_en_mask) > 0)
+            )
+        ]
+
+        # Latch outputs until FB signal returns
+        self.sync += [
+            If(self._event_pulse,
+                self._output_vec.eq(self._control.fields.out_en_mask)
+            ).Else(
+                self._output_vec.eq(self._output_vec & ~self._output_fb_vec)
+            )
+        ]
+
 class EventGenerator(LiteXModule):
     def __init__(self, sys_clk_freq=100e6):
         self.event = Signal()
@@ -194,16 +229,16 @@ class EventGenerator(LiteXModule):
         ]
 
 class ExternalSync(LiteXModule):
-    def __init__(self, pads=None, sys_clk_freq=100e6, sync_out_clk_domain=None):
+    def __init__(self, pads=None, sys_clk_freq=100e6):
         self.ext_in = Signal()
         self.ext_out = Signal()
         self._out_pulse = _out_pulse = Signal()
-        self._out_clk_sync = _out_clk_sync = Signal()
+        self.out_clk_sync = out_clk_sync = Signal()
         self.ext_in_unfilt = _in_unfiltered = Signal()
 
         _ext_out_last = Signal()
 
-        self._control  = CSRStorage(2, description="Sync Tristate(s) Control. Valid Values are:"\
+        self._control  = CSRStorage(2, description="Sync Tristate(s) Control. Valid Values are:" \
                                         "\n\t0b00 - Disabled" \
                                         "\n\t0b01 - Input Enabled" \
                                         "\n\t0b10 - Output Enabled"
@@ -241,12 +276,6 @@ class ExternalSync(LiteXModule):
             _ext_out_last.eq(self.ext_out)
         ]
 
-        # If a different output clock is required, sync here
-        if sync_out_clk_domain is not None:
-            self.specials += MultiReg(_out_pulse, _out_clk_sync, sync_out_clk_domain)
-        else:
-            self.comb += _out_clk_sync.eq(_out_pulse)
-
         if pads is not None:
             if hasattr(pads, "de"):
                 # Dev and Production units have a differential buffer for Sync I/O
@@ -257,7 +286,7 @@ class ExternalSync(LiteXModule):
                         o_O  = _in_unfiltered
                     ),
                     Instance("OBUFDS",
-                        i_I  = _out_clk_sync,
+                        i_I  = out_clk_sync,
                         o_O  = pads.out_p,
                         o_OB = pads.out_n,
                     )
@@ -278,13 +307,9 @@ class ExternalSync(LiteXModule):
             else:
                 # This is to support Beta units with a single Tri-state pin sync
                 pin_ctl = Signal()
+                self.comb += pin_ctl.eq(self._control.storage == 0b01)
                 self.specials += Instance("IOBUF",
-                                    i_IO = pads,
-                                    i_I  = _out_clk_sync,
+                                    io_IO = pads,
+                                    i_I  = out_clk_sync,
                                     i_T  = pin_ctl,
                                     o_O  = _in_unfiltered)
-                self.comb += [
-                    If(self._control.storage == 0b01,
-                       pin_ctl.eq(1)
-                    ).Else(pin_ctl.eq(0))
-                ]

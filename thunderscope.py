@@ -550,27 +550,26 @@ class BaseSoC(SoCMini):
                 def __init__(self, sys_clk_freq, marker=None):
                     self.submodules.engine = evt_engine = EventEngine(marker)
                     self.submodules.generator = evt_gen = EventGenerator(sys_clk_freq)
-                    self.submodules.ext_sync = ext_sync = ExternalSync(pads=platform.request("sync"),
-                                                                       sys_clk_freq=sys_clk_freq,
-                                                                       sync_out_clk_domain="adc_frame")
+                    self.submodules.ext_sync = ext_sync = ExternalSync(pads=platform.request("aux_sync"),
+                                                                       sys_clk_freq=sys_clk_freq)
 
-                    evt_engine.add_input(evt_gen.event) # Input 0
 
             self.submodules.events = Events(sys_clk_freq, count_latch)
 
-            self.events.engine.add_output(self.events.ext_sync.ext_out) # Output 0
-
             # Sample External Sync from ADC Clk Domain
-            self.adc.hmcad1520.add_side_channel(side_channels = [self.events.ext_sync.ext_in_unfilt])
+            self.adc.hmcad1520.add_sync_channel(sync_in = self.events.ext_sync.ext_in_unfilt,
+                                                sync_out = self.events.ext_sync.out_clk_sync,
+                                                sync_trigger = self.events.ext_sync._out_pulse,
+                                                sync_sel = self.events.engine._control.fields.sync_sel)
 
             # Get Sync transition offset
             self.events.submodules.adc_encoder = adc_enc = PriorityEncoder(16)
-            self.comb += adc_enc.i.eq(self.adc.hmcad1520.side_source.data)
+            self.comb += adc_enc.i.eq(self.adc.hmcad1520.sync_source.data)
             ext_evt_in = Signal()
             adjust_latch = Signal(4)
             self.sync += [
                 # Drive Ext Event Input
-                If(self.adc.hmcad1520.side_source.valid,
+                If(self.adc.hmcad1520.sync_source.valid,
                     # Latch first offset of event
                     If((ext_evt_in == 0) & ~adc_enc.n,
                         adjust_latch.eq(adc_enc.o),
@@ -583,10 +582,15 @@ class BaseSoC(SoCMini):
             self.comb += [
                 self.events.engine.adj.eq(adjust_latch),
                 # Update this status signal when we have a valid event
-                self.events.ext_sync.ext_in.eq(ext_evt_in)
+                self.events.ext_sync.ext_in.eq(ext_evt_in),
             ]
             
+            sync_out_fb = Signal()
+            self.sync += sync_out_fb.eq(self.events.ext_sync._out_pulse & ext_evt_in)
+
+            self.events.engine.add_output(self.events.ext_sync.ext_out, sync_out_fb) # Output 0
             # Map the External Sync to the Event Engine when valid
+            self.events.engine.add_input(self.events.generator.event) # Input 0
             self.events.engine.add_input(ext_evt_in) # Input 1
             self.events.engine.map_events()
 

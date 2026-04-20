@@ -93,7 +93,7 @@ a7_484_io = [
 
     # SYNC
     # ----------------
-    ("sync", 0, Pins("Y22"), IOStandard("LVCMOS33"))
+    ("aux_sync", 0, Pins("Y22"), IOStandard("LVTTL"))
 ]
 
 # Custom xc7a50T Module
@@ -181,7 +181,7 @@ a7_325_io = [
 
     # SYNC
     # ----------------
-    ("sync", 0, Pins("P6"), IOStandard("LVCMOS33"))
+    ("aux_sync", 0, Pins("P6"), IOStandard("LVTTL"))
 ]
 
 # Thunderscope Production
@@ -294,7 +294,7 @@ a7_thunderscope_rev5 = [
 
     # SYNC
     # ----------------
-    ("sync", 0,
+    ("aux_sync", 0,
         Subsignal("in_p", Pins("D8")), 
         Subsignal("in_n", Pins("C8")), 
         Subsignal("out_p", Pins("D9")), 
