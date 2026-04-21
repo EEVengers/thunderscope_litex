@@ -209,6 +209,8 @@ class BaseSoC(SoCMini):
         # JTAGBone ---------------------------------------------------------------------------------
         if with_jtagbone:
             self.add_jtagbone()
+            platform.add_period_constraint(self.jtagbone.phy.cd_jtag.clk, 1e9/20e6)
+            platform.add_false_path_constraints(self.jtagbone.phy.cd_jtag.clk, self.crg.cd_sys.clk)
 
         # XADC -------------------------------------------------------------------------------------
         self.submodules.xadc = XADC()
@@ -216,6 +218,7 @@ class BaseSoC(SoCMini):
         # DNA --------------------------------------------------------------------------------------
         self.submodules.dna = DNA()
         self.dna.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
+        platform.add_false_path_constraints(self.dna.cd_dna.clk, self.crg.cd_sys.clk)
 
         # PCIe -------------------------------------------------------------------------------------
         self.submodules.pcie_phy = S7PCIEPHY(platform, platform.request("pcie_x4"),
@@ -224,10 +227,27 @@ class BaseSoC(SoCMini):
         )
         self.pcie_phy.config.update({
             "Vendor_ID": "20A7",
+            # [15..12] Category 0, first used for EEVengers devices
+            # [11.. 8] Class of Device, 1: Oscilloscope, others TBD
+            # [ 7.. 0] Unique product index, 01 for ThunderScope
             "Device_ID": "0101"
         })
         self.add_pcie(phy=self.pcie_phy, ndmas=1, dma_buffering_depth=1024*16,
                       max_pending_requests=4, address_width=64)
+        
+        # Timings False Paths.
+        # --------------------
+        platform.toolchain.pre_placement_commands.append("set_false_path -from [get_pins main_s7pciephy_pclk_sel_reg/C] -to [get_pins BUFGCTRL/S1]")
+        false_paths = [
+            ("{{*s7pciephy_clkout0}}", "{{*crg_*clkout0}}"),
+            ("{{*s7pciephy_clkout1}}", "{{*crg_*clkout0}}"),
+            ("{{*s7pciephy_clkout3}}", "{{*crg_*clkout0}}"),
+            ("{{*s7pciephy_clkout*}}", "{{sys_clk}}"),
+            ("{{*s7pciephy_clkout0}}", "{{*s7pciephy_clkout1}}")
+        ]
+        for clk0, clk1 in false_paths:
+            platform.toolchain.pre_placement_commands.append(f"set_false_path -from [get_clocks {clk0}] -to [get_clocks {clk1}]")
+            platform.toolchain.pre_placement_commands.append(f"set_false_path -from [get_clocks {clk1}] -to [get_clocks {clk0}]")
 
 
         # SPI Flash --------------------------------------------------------------------------------
@@ -259,7 +279,7 @@ class BaseSoC(SoCMini):
                            rate="1:1", with_mmap=True, with_master=True, with_mmap_write="csr")
 
         # # QSPI Flash Adapter -----------------------------------------------------------------------
-        pcie_translated = wishbone.Interface(bursting=True)
+        pcie_translated = wishbone.Interface.like(self.bus.masters["pcie_mmap"])
         pcie_wb = self.bus.masters["pcie_mmap"]
 
         self.submodules.flash_adapter = WindowRemapper(
@@ -275,6 +295,7 @@ class BaseSoC(SoCMini):
         self.submodules.icap = ICAP()
         self.icap.add_reload()
         self.icap.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
+        platform.add_false_path_constraints(self.icap.cd_icap.clk, self.crg.cd_sys.clk)
 
         # Frontend / ADC ---------------------------------------------------------------------------
 
@@ -395,7 +416,7 @@ class BaseSoC(SoCMini):
                 sys_clk_freq     = sys_clk_freq,
             )
 
-        # ADC.
+        # ADC
         if with_adc:
 
             class ADC(Module, AutoCSR):
@@ -421,6 +442,7 @@ class BaseSoC(SoCMini):
                             ("``0b0``", "ADC in operational mode."),
                             ("``0b1``", "ADC in power-down mode."),
                         ]),
+                        CSRField("count_reset", offset=8, size=1, pulse=True, description="Reset the ADC Sample Counter")
                     ])
                    
                     self._status = CSRStatus(fields=[
@@ -470,17 +492,16 @@ class BaseSoC(SoCMini):
                     self.submodules.gate = stream.Gate([("data", data_width)], sink_ready_when_disabled=True)
                     self.comb += self.gate.enable.eq(self.trigger.enable)
 
-                    # Pipeline.
-                    self.submodules += stream.Pipeline(
-                        self.hmcad1520,
-                        self.gate,
-                        self.source
-                    )
+                    # ADC Pipeline.
+                    self.comb += [
+                        self.hmcad1520.source.connect(self.gate.sink),
+                        self.gate.source.connect(self.source)
+                    ]
 
                     # Captured Sample Counter
                     self.sample_count = sample_count = Signal(64)
                     self.sync += [
-                        If(self._status.fields.frame_sync,
+                        If(~self._control.fields.count_reset,
                            If(self.source.ready & self.source.valid,
                                 sample_count.eq(sample_count + 1)
                             )
@@ -513,23 +534,67 @@ class BaseSoC(SoCMini):
             # ADC -> PCIe.
             self.sync += self.adc.source.connect(self.pcie_dma0.sink)
 
-        # Event Subsystem ----------------------------------------------------------------------
+            # ADC Timing Constraints
+            self.platform.add_false_path_constraints(self.adc.hmcad1520.cd_adc_frame.clk, self.crg.cd_sys.clk)
+            self.platform.add_period_constraint(self.adc.hmcad1520.cd_adc_frame.clk, 1e9/125e6)
 
-        if with_events:
+        # Event Subsystem ----------------------------------------------------------------------
+        sync_pins = platform.request("aux_sync", loose = True)
+        if with_events and hasattr(sync_pins, "de"):
+            # Latch Marker value
+            count_latch = Signal(64)
+            self.sync += [
+                count_latch.eq(self.adc.sample_count)
+            ]
+
             class Events(LiteXModule):
-                def __init__(self, sys_clk_freq, marker=None):
+                def __init__(self, sys_clk_freq, pads=None, marker=None):
                     self.submodules.engine = evt_engine = EventEngine(marker)
                     self.submodules.generator = evt_gen = EventGenerator(sys_clk_freq)
-                    self.submodules.ext_sync = ext_sync = ExternalSync(pads=platform.request("sync"), sys_clk_freq=sys_clk_freq)
+                    
+                    self.submodules.ext_sync = ext_sync = ExternalSync(pads=pads,
+                                                                       sys_clk_freq=sys_clk_freq)
 
-                    evt_engine.add_input(evt_gen.event) # Input 0
-                    evt_engine.add_input(ext_sync.ext_in) # Input 1
 
-                    evt_engine.add_output(ext_sync.ext_out) # Output 0
+            self.submodules.events = Events(sys_clk_freq, sync_pins, count_latch)
 
-                    evt_engine.map_events()
+            # Sample External Sync from ADC Clk Domain
+            self.adc.hmcad1520.add_sync_channel(sync_in = self.events.ext_sync.ext_in_unfilt,
+                                                sync_out = self.events.ext_sync.out_clk_sync,
+                                                sync_trigger = self.events.ext_sync._out_pulse,
+                                                sync_sel = self.events.engine._control.fields.sync_sel)
 
-            self.submodules.events = Events(sys_clk_freq, self.adc.sample_count)
+            # Get Sync transition offset
+            self.events.submodules.adc_encoder = adc_enc = PriorityEncoder(16)
+            self.comb += adc_enc.i.eq(self.adc.hmcad1520.sync_source.data)
+            ext_evt_in = Signal()
+            adjust_latch = Signal(4)
+            self.sync += [
+                # Drive Ext Event Input
+                If(self.adc.hmcad1520.sync_source.valid,
+                    # Latch first offset of event
+                    If((ext_evt_in == 0) & ~adc_enc.n,
+                        adjust_latch.eq(adc_enc.o),
+                    ),
+                    ext_evt_in.eq(~adc_enc.n)
+                ).Else(
+                    ext_evt_in.eq(ext_evt_in)
+                )
+            ]
+            self.comb += [
+                self.events.engine.adj.eq(adjust_latch),
+                # Update this status signal when we have a valid event
+                self.events.ext_sync.ext_in.eq(ext_evt_in),
+            ]
+            
+            sync_out_fb = Signal()
+            self.sync += sync_out_fb.eq(self.events.ext_sync._out_pulse & ext_evt_in)
+
+            self.events.engine.add_output(self.events.ext_sync.ext_out, sync_out_fb) # Output 0
+            # Map the External Sync to the Event Engine when valid
+            self.events.engine.add_input(self.events.generator.event) # Input 0
+            self.events.engine.add_input(ext_evt_in) # Input 1
+            self.events.engine.map_events()
 
         # Analyzer -----------------------------------------------------------------------------
 
@@ -537,7 +602,7 @@ class BaseSoC(SoCMini):
             analyzer_signals = [
             ]
             self.submodules.analyzer = LiteScopeAnalyzer(analyzer_signals,
-                depth        = 1024,
+                depth        = 512,
                 clock_domain = "sys",
                 samplerate   = sys_clk_freq,
                 csr_csv      = "test/analyzer.csv"
@@ -549,6 +614,7 @@ def main():
     from litex.build.parser import LiteXArgumentParser
     parser = LiteXArgumentParser(platform=ThunderscopePlatform, description="LitePCIe SoC on ThunderScope")
     target_group = parser.add_argument_group(title="Target options")
+    target_group.add_argument("--gen",       action="store_true", help="Generate project Verilog sources")
     target_group.add_argument("--variant",   default="dev",     help="Board variant [prod, dev, a200t, a100t, a50t].")
     target_group.add_argument("--flash",     action="store_true", help="Flash bitstream.")
     target_group.add_argument("--driver",    action="store_true", help="Generate PCIe driver.")
@@ -563,13 +629,19 @@ def main():
     soc = BaseSoC(variant = args.variant, **parser.soc_argdict)
 
     builder  = Builder(soc,  **parser.builder_argdict)
+
     os.makedirs(builder.gateware_dir, exist_ok=True)
     shutil.copyfile(f"bin/barrierA.bin", f"{builder.gateware_dir}/barrierA.bin")
     shutil.copyfile(f"bin/barrierB.bin", f"{builder.gateware_dir}/barrierB.bin")
-    builder.build(run=args.build)
+
+    if args.build:
+        builder.build(run=True)
+    elif args.gen:
+        builder.build(run=False)
 
     # Generate LitePCIe Driver.
     if args.driver:
+        builder.build(run=False)
         generate_litepcie_software(soc, args.driver_dir)
 
     # Load Bistream.
