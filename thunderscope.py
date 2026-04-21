@@ -539,7 +539,8 @@ class BaseSoC(SoCMini):
             self.platform.add_period_constraint(self.adc.hmcad1520.cd_adc_frame.clk, 1e9/125e6)
 
         # Event Subsystem ----------------------------------------------------------------------
-        if with_events:
+        sync_pins = platform.request("aux_sync", loose = True)
+        if with_events and hasattr(sync_pins, "de"):
             # Latch Marker value
             count_latch = Signal(64)
             self.sync += [
@@ -547,14 +548,15 @@ class BaseSoC(SoCMini):
             ]
 
             class Events(LiteXModule):
-                def __init__(self, sys_clk_freq, marker=None):
+                def __init__(self, sys_clk_freq, pads=None, marker=None):
                     self.submodules.engine = evt_engine = EventEngine(marker)
                     self.submodules.generator = evt_gen = EventGenerator(sys_clk_freq)
-                    self.submodules.ext_sync = ext_sync = ExternalSync(pads=platform.request("aux_sync"),
+                    
+                    self.submodules.ext_sync = ext_sync = ExternalSync(pads=pads,
                                                                        sys_clk_freq=sys_clk_freq)
 
 
-            self.submodules.events = Events(sys_clk_freq, count_latch)
+            self.submodules.events = Events(sys_clk_freq, sync_pins, count_latch)
 
             # Sample External Sync from ADC Clk Domain
             self.adc.hmcad1520.add_sync_channel(sync_in = self.events.ext_sync.ext_in_unfilt,
