@@ -1,1 +1,0 @@
-./acorn.py --variant=cle-101 --with-pcie --cpu-type None --output-dir ./build/acorn --soc-csv ./build/acorn/soc-map.csv --build --driver
