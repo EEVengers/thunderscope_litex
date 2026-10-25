@@ -6,8 +6,16 @@
 include version.mk
 export BUILD_VERSION
 
-# Use Python3.  Some systems may need this to be just 'python'
+export PYTHONUTF8:=1
+
+# Use the native shell on Windows; no Unix command-line utilities are required.
+ifeq ($(OS),Windows_NT)
+SHELL:=cmd.exe
+.SHELLFLAGS:=/c
+PY?=py -V:3.12
+else
 PY?=python3
+endif
 
 PROJECT:=thunderscope
 
@@ -40,70 +48,68 @@ SOURCES:= $(foreach x, $(SRC_PATH), $(wildcard $(addprefix $(x)/*,.py*)))
 
 ## Configure Virtual Environment
 VENV_PATH:=.venv
+# Avoid shadowing the editable litex package when Python searches the venv root.
+LITEX_PATH:=$(VENV_PATH)/litex-src
 
 ifeq ($(OS),Windows_NT)
-VENV_ACTIVATE:=$(VENV_PATH)/activate.bat
+VENV_PY:=$(subst /,\,$(abspath $(VENV_PATH)/Scripts/python.exe))
+VENV_RUN:=set "PATH=$(subst /,\,$(abspath $(VENV_PATH)/Scripts));$(PATH)" && "$(VENV_PY)"
 else
-VENV_ACTIVATE:=. $(VENV_PATH)/bin/activate
+VENV_PY:=$(abspath $(VENV_PATH)/bin/python)
+VENV_RUN:=PATH="$(abspath $(VENV_PATH)/bin):$$PATH" "$(VENV_PY)"
 endif
 
 .PHONY: venv
-$(VENV_PATH)/.stamp_$(LITEX_RELEASE_TAG):
-	@rm -rf $(VENV_PATH)
-	$(PY) -m venv $(VENV_PATH)
-	$(VENV_ACTIVATE) && \
-	pip install --upgrade pip && \
-	pip install -r requirements.txt && \
-	mkdir $(VENV_PATH)/litex && \
-	cd $(VENV_PATH)/litex && \
-	wget https://raw.githubusercontent.com/enjoy-digital/litex/$(LITEX_RELEASE_TAG)/litex_setup.py && \
-	$(PY) litex_setup.py --init --install --tag=$(LITEX_RELEASE_TAG)
-	touch $(VENV_PATH)/.stamp_$(LITEX_RELEASE_TAG)
+# Use current repository definitions, but avoid the CLI's auto-update/restart.
+$(VENV_PATH)/.stamp_$(LITEX_RELEASE_TAG): Makefile requirements.txt
+	@$(PY) -c "import os, pathlib, shutil, stat; p = pathlib.Path('$(VENV_PATH)'); shutil.rmtree(p, onerror=lambda f, path, exc: (os.chmod(path, stat.S_IWRITE), f(path))) if p.exists() else None"
+	$(PY) -m venv "$(VENV_PATH)"
+	$(VENV_RUN) -m pip install --upgrade pip
+	$(VENV_RUN) -m pip install -r requirements.txt
+	$(VENV_RUN) -c "from pathlib import Path; Path('$(LITEX_PATH)').mkdir()"
+	$(VENV_RUN) -c "import urllib.request; urllib.request.urlretrieve('https://raw.githubusercontent.com/enjoy-digital/litex/master/litex_setup.py', '$(LITEX_PATH)/litex_setup.py')"
+	cd "$(LITEX_PATH)" && $(VENV_RUN) -c "import litex_setup; litex_setup.litex_setup_import_repos(download=True); litex_setup.litex_setup_init_repos(tag='$(LITEX_RELEASE_TAG)'); litex_setup.litex_setup_install_repos()"
+	$(VENV_RUN) -c "import $(PROJECT)"
+	$(VENV_RUN) -c "from pathlib import Path; Path('$(VENV_PATH)/.stamp_$(LITEX_RELEASE_TAG)').touch()"
 
 venv: $(VENV_PATH)/.stamp_$(LITEX_RELEASE_TAG)
 	@echo "Using virtual environment, LiteX version: $(LITEX_RELEASE_TAG)"
 
-.PHONY: all release driver docs
+.PHONY: all release driver docs distclean $(ALL_VARIANTS) $(LOAD_VARIANTS)
 
 # Release target to build supported artifacts
 release: $(RELEASE_VARIANTS) docs driver
-	@cp -a $(BUILD_PATH)/$(PROJECT)/doc $(DIST_PATH)/doc
+	@$(VENV_RUN) -c "import shutil; shutil.copytree('$(BUILD_PATH)/$(PROJECT)/doc', '$(DIST_PATH)/doc', dirs_exist_ok=True)"
 
 
 all: $(ALL_VARIANTS) docs driver
 
 $(ALL_VARIANTS) : $(SOURCES) venv
-	$(VENV_ACTIVATE) && \
-	$(PY) $(PROJECT).py --variant=$@ --build --output-dir=$(BUILD_PATH)/$(PROJECT)_$@
-	# Copy to destination folder
-	@mkdir -p $(DIST_PATH)/$@
-	@cp $(BUILD_PATH)/$(PROJECT)_$@/gateware/$(PROJECT)_full.bin $(DIST_PATH)/$@/$(PROJECT)_full_$@_$(BUILD_VERSION).bin
-	@cp $(BUILD_PATH)/$(PROJECT)_$@/gateware/$(PROJECT)_full.mcs $(DIST_PATH)/$@/$(PROJECT)_full_$@_$(BUILD_VERSION).mcs
-	@cp $(BUILD_PATH)/$(PROJECT)_$@/gateware/$(PROJECT)_update.bin $(DIST_PATH)/$@/$(PROJECT)_update_$@_$(BUILD_VERSION).bin
-	@cp $(BUILD_PATH)/$(PROJECT)_$@/gateware/$(PROJECT)_update.bit $(DIST_PATH)/$@/$(PROJECT)_update_$@_$(BUILD_VERSION).bit
+	$(VENV_RUN) $(PROJECT).py --variant=$@ --build --output-dir=$(BUILD_PATH)/$(PROJECT)_$@
+	@$(VENV_RUN) -c "from pathlib import Path; Path('$(DIST_PATH)/$@').mkdir(parents=True, exist_ok=True)"
+	@$(VENV_RUN) -c "import shutil; shutil.copy2('$(BUILD_PATH)/$(PROJECT)_$@/gateware/$(PROJECT)_full.bin', '$(DIST_PATH)/$@/$(PROJECT)_full_$@_$(BUILD_VERSION).bin')"
+	@$(VENV_RUN) -c "import shutil; shutil.copy2('$(BUILD_PATH)/$(PROJECT)_$@/gateware/$(PROJECT)_full.mcs', '$(DIST_PATH)/$@/$(PROJECT)_full_$@_$(BUILD_VERSION).mcs')"
+	@$(VENV_RUN) -c "import shutil; shutil.copy2('$(BUILD_PATH)/$(PROJECT)_$@/gateware/$(PROJECT)_update.bin', '$(DIST_PATH)/$@/$(PROJECT)_update_$@_$(BUILD_VERSION).bin')"
+	@$(VENV_RUN) -c "import shutil; shutil.copy2('$(BUILD_PATH)/$(PROJECT)_$@/gateware/$(PROJECT)_update.bit', '$(DIST_PATH)/$@/$(PROJECT)_update_$@_$(BUILD_VERSION).bit')"
 
 
 .PHONY: gen $(GEN_VARIANTS)
 gen: $(GEN_VARIANTS) venv
 
 $(GEN_VARIANTS): gen-% : $(SOURCES) venv
-	$(VENV_ACTIVATE) && \
-	$(PY) $(PROJECT).py --variant=$* --gen --output-dir=$(BUILD_PATH)/$(PROJECT)_$*
+	$(VENV_RUN) $(PROJECT).py --variant=$* --gen --output-dir=$(BUILD_PATH)/$(PROJECT)_$*
 
 $(LOAD_VARIANTS): load-% : $(SOURCES) venv
-	$(VENV_ACTIVATE) && \
-	$(PY) $(PROJECT).py --variant=$* --load --output-dir=$(BUILD_PATH)/$(PROJECT)_$*
+	$(VENV_RUN) $(PROJECT).py --variant=$* --load --output-dir=$(BUILD_PATH)/$(PROJECT)_$*
 
 driver: venv
-	$(VENV_ACTIVATE) && \
-	$(PY) $(PROJECT).py --driver --driver-dir=$(BUILD_PATH)/$(PROJECT)/driver --csr-csv=$(BUILD_PATH)/$(PROJECT)/csr.csv
+	$(VENV_RUN) $(PROJECT).py --driver --driver-dir=$(BUILD_PATH)/$(PROJECT)/driver --csr-csv=$(BUILD_PATH)/$(PROJECT)/csr.csv
 
 docs: venv
-	$(VENV_ACTIVATE) && \
-	$(PY) $(PROJECT).py --variant=prod --doc
-	@sphinx-build $(BUILD_PATH)/$(PROJECT)/doc $(BUILD_PATH)/docs
-	zip -ur $(DIST_PATH)/$(PROJECT)_docs.zip $(BUILD_PATH)/docs/*
+	$(VENV_RUN) $(PROJECT).py --variant=prod --doc
+	$(VENV_RUN) -m sphinx $(BUILD_PATH)/$(PROJECT)/doc $(BUILD_PATH)/docs
+	@$(VENV_RUN) -c "from pathlib import Path; Path('$(DIST_PATH)').mkdir(parents=True, exist_ok=True)"
+	$(VENV_RUN) -c "import shutil; shutil.make_archive('$(DIST_PATH)/$(PROJECT)_docs', 'zip', '.', '$(BUILD_PATH)/docs')"
 
 distclean:
-	@rm -rf $(BUILD_PATH)/*
-	@rm -rf $(DIST_PATH)
+	@$(PY) -c "from pathlib import Path; import os, shutil, stat; [shutil.rmtree(p, onerror=lambda f, path, exc: (os.chmod(path, stat.S_IWRITE), f(path))) for p in (Path('$(BUILD_PATH)'), Path('$(DIST_PATH)')) if p.exists()]"
