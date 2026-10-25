@@ -21,6 +21,7 @@ from litex.soc.interconnect import stream
 
 from peripherals.downsampling import DownSampling
 from peripherals.byteShuffler import ByteShuffler
+from peripherals.adcStreamAligner import AdcStreamAligner
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #                               D E S C R I P T I O N                                              #
@@ -441,7 +442,8 @@ class HMCAD1520ADC(LiteXModule):
             layout   = [("data", nchannels*16)],
             cd_from  = "adc_frame",
             cd_to    = clock_domain,
-            buffered = True
+            buffered = True,
+            with_common_rst = True
         )
 
         # Shuffler.
@@ -459,6 +461,7 @@ class HMCAD1520ADC(LiteXModule):
                                                         [2, 0, 6, 4, 10, 8, 14, 12, 3, 1, 7, 5, 11, 9, 15, 13]  # Dual 8-Bit, Quad Channel
                                                     ])
         self.comb += self.adc_shuffler.shuffle.eq(self._data_channels.fields.shuffle)
+        self.aligner = AdcStreamAligner(nchannels*16)
 
         # DownSampling.
         # # -------------
@@ -468,7 +471,8 @@ class HMCAD1520ADC(LiteXModule):
         self.comb += [
             self.adc_source.connect(self.adc_cdc.sink),
             self.adc_cdc.source.connect(self.adc_shuffler.sink),
-            self.adc_shuffler.source.connect(self.source)
+            self.adc_shuffler.source.connect(self.aligner.sink),
+            self.aligner.source.connect(self.source)
         ]
         
         # Statistics.
@@ -625,23 +629,16 @@ class HMCAD1520ADC(LiteXModule):
             layout   = [("data", len(side_channels)*16)],
             cd_from  = "adc_frame",
             cd_to    = clock_domain,
-            buffered = True
+            buffered = True,
+            with_common_rst = True
         )
 
         # Connect Side-Channel Pipeline
+        side_sink, side_source = self.aligner.add_side_channel(len(side_channels)*16)
         self.comb += [
             self.side_channel_data.connect(self.side_channel_cdc.sink),
-            self.side_channel_cdc.source.connect(self.side_source)
-        ]
-
-        # Synchronize Event Sample with ADC Data
-        cdc_sync = Signal()
-        self.comb += [
-            cdc_sync.eq(self.side_channel_cdc.source.valid & self.adc_shuffler.source.valid),
-            self.source.ready.eq(cdc_sync),
-            self.source.valid.eq(cdc_sync),
-            self.side_source.ready.eq(cdc_sync),
-            self.side_source.valid.eq(cdc_sync),
+            self.side_channel_cdc.source.connect(side_sink),
+            side_source.connect(self.side_source, omit={"ready"})
         ]
 
     def add_sync_channel(self, sync_in=None, sync_out=None, sync_trigger=None, sync_sel=None, clock_domain="sys"):
@@ -759,13 +756,16 @@ class HMCAD1520ADC(LiteXModule):
             layout   = [("data", 16)],
             cd_from  = "adc_frame",
             cd_to    = clock_domain,
-            buffered = True
+            buffered = True,
+            with_common_rst = True
         )
 
         # Connect Side-Channel Pipeline
+        sync_sink, sync_source = self.aligner.add_side_channel(16)
         self.comb += [
             sync_data.connect(self.sync_cdc.sink),
-            self.sync_cdc.source.connect(self.sync_source)
+            self.sync_cdc.source.connect(sync_sink),
+            sync_source.connect(self.sync_source, omit={"ready"})
         ]
 
         self.comb += [
@@ -777,14 +777,4 @@ class HMCAD1520ADC(LiteXModule):
                     self.sync_cdc.sink.data.eq(0x0000)
                 )
             )
-        ]
-
-        # Synchronize Event Sample with ADC Data
-        cdc_sync = Signal()
-        self.comb += [
-            cdc_sync.eq(self.sync_cdc.source.valid & self.adc_shuffler.source.valid),
-            self.source.ready.eq(cdc_sync),
-            self.source.valid.eq(cdc_sync),
-            self.sync_source.ready.eq(cdc_sync),
-            self.sync_source.valid.eq(cdc_sync),
         ]

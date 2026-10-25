@@ -43,7 +43,7 @@ from litescope import LiteScopeAnalyzer
 
 from peripherals.windowRemapper import WindowRemapper
 from peripherals.hmcad1520_adc import HMCAD1520ADC
-from peripherals.trigger import Trigger
+from peripherals.dmaInputGate import DmaInputGate
 from peripherals.eventEngine import *
 from thunderscope_platform import *
 
@@ -454,7 +454,13 @@ class BaseSoC(SoCMini):
                             ("``0b0``", "ADC Frame Clock not in sync."),
                             ("``0b1``", "ADC has good sync with Frame Clock."),
                         ]),
+                        CSRField("dma_input_drop", offset=2, size=1, description="Indicates if DMA input gate dropped any samples when gate is enabled."),
                     ])
+                    self._gate_control = CSRStorage(name="dma_input_gate_control", fields=[
+                        CSRField("enable", offset=0, size=1, description="Enable DMA input gate."),
+                    ])
+                    self.gate_enable = Signal()
+                    self.sync += self.gate_enable.eq(self._gate_control.fields.enable)
 
                     # Data Source.
                     self.source = stream.Endpoint([("data", data_width)])
@@ -475,9 +481,6 @@ class BaseSoC(SoCMini):
 
                     # Data-Path --------------------------------------------------------------------
 
-                    # Trigger.
-                    self.submodules.trigger = Trigger()
-
                     # HMCAD1520.
                     self.submodules.hmcad1520 = HMCAD1520ADC(pads=data_pads,
                                                              sys_clk_freq=sys_clk_freq,
@@ -489,8 +492,11 @@ class BaseSoC(SoCMini):
                     self.specials += MultiReg(self.hmcad1520.frame_valid, self._status.fields.frame_sync)
 
                     # Gate.
-                    self.submodules.gate = stream.Gate([("data", data_width)], sink_ready_when_disabled=True)
-                    self.comb += self.gate.enable.eq(self.trigger.enable)
+                    self.submodules.gate = DmaInputGate(data_width)
+                    self.comb += [
+                        self.gate.enable.eq(self.gate_enable),
+                        self._status.fields.dma_input_drop.eq(self.gate.drop_latch),
+                    ]
 
                     # ADC Pipeline.
                     self.comb += [
@@ -532,7 +538,7 @@ class BaseSoC(SoCMini):
             )
 
             # ADC -> PCIe.
-            self.sync += self.adc.source.connect(self.pcie_dma0.sink)
+            self.comb += self.adc.source.connect(self.pcie_dma0.sink)
 
             # ADC Timing Constraints
             self.platform.add_false_path_constraints(self.adc.hmcad1520.cd_adc_frame.clk, self.crg.cd_sys.clk)
