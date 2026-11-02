@@ -99,6 +99,19 @@ class EightTwelve(LiteXModule):
         self.comb += Case(step, o_cases)
 
 
+def encode_12bit_sync(data):
+    """Map 12 serial timing bits to eight sample bins, earliest bit first.
+
+    Each 3-to-2 reduction preserves any-high detection and the final level,
+    but can merge transitions and quantize edge timing.
+    """
+    pairs = []
+    for j in range(4):
+        first, middle, last = data[3*j], data[3*j+1], data[3*j+2]
+        pairs.append(Cat((~last & (first | middle)) | (first & middle), last))
+    return Cat(*pairs)
+
+
 # HMCAD1520 ADC ------------------------------------------------------------------------------------
 
 class HMCAD1520ADC(LiteXModule):
@@ -603,20 +616,8 @@ class HMCAD1520ADC(LiteXModule):
                     side_channel_data.data[16*sig_idx:16*(sig_idx+1)].eq(d8_gear.source.data[0:16]),
                     side_channel_data.valid.eq(d8_gear.source.valid)
                 ).Else(
-                    # Compress 12 to 8, preserving any transitions
-                    # [1:0] <= [2:0]
-                    # [0] <= (2' & 1) | (2' & 0) | (1 & 0)
-                    # [1] <= [2]
-                    {side_channel_data.data[16*sig_idx+2*j].eq(
-                            (~d12_gear.source.data[(3*j)+2] & (d12_gear.source.data[(3*j)])) |
-                            (~d12_gear.source.data[(3*j)+2] & d12_gear.source.data[(3*j)+1]) |
-                            (d12_gear.source.data[(3*j)+1] & d12_gear.source.data[(3*j)])
-                        ) for j in range(0,4)},
-                    {side_channel_data.data[(16*sig_idx)+(2*j)+1].eq(
-                            (d12_gear.source.data[(3*j)+2])
-                        ) for j in range(0,4)},
-                    # Pad upper bits zero
-                    {side_channel_data.data[16*(sig_idx+1)-j].eq(0) for j in range(1,5)},
+                    side_channel_data.data[16*sig_idx:16*(sig_idx+1)].eq(
+                        encode_12bit_sync(d12_gear.source.data)),
                     side_channel_data.valid.eq(d12_gear.source.valid)
                 ),
                 d8_gear.reset.eq(~self.frame_valid)
@@ -726,20 +727,7 @@ class HMCAD1520ADC(LiteXModule):
                 sync_data.data[0:16].eq(d8_gear.source.data[0:16]),
                 sync_data.valid.eq(d8_gear.source.valid)
             ).Else(
-                # Compress 12 to 8, preserving any transitions
-                # [1:0] <= [2:0]
-                # [0] <= (2' & 1) | (2' & 0) | (1 & 0)
-                # [1] <= [2]
-                {sync_data.data[2*j].eq(
-                        (~d12_gear.source.data[(3*j)+2] & (d12_gear.source.data[(3*j)])) |
-                        (~d12_gear.source.data[(3*j)+2] & d12_gear.source.data[(3*j)+1]) |
-                        (d12_gear.source.data[(3*j)+1] & d12_gear.source.data[(3*j)])
-                    ) for j in range(0,4)},
-                {sync_data.data[(2*j)+1].eq(
-                        (d12_gear.source.data[(3*j)+2])
-                    ) for j in range(0,4)},
-                # Pad upper bits zero
-                {sync_data.data[16-j].eq(0) for j in range(1,5)},
+                sync_data.data.eq(encode_12bit_sync(d12_gear.source.data)),
                 sync_data.valid.eq(d12_gear.source.valid)
             ),
             d8_gear.reset.eq(~self.frame_valid)
